@@ -1,59 +1,53 @@
 # SmartCompact
 
-**English summary.** SmartCompact makes long coding-agent sessions compact *earlier, at the right moment* — once the context is past a threshold (200k tokens by default) and a piece of work has just been finished, typically a commit. Every request re-reads the whole context, so keeping it smaller saves money; picking the moment right after a commit avoids interrupting work. It never compacts in the middle of a task by itself. It works with Claude Code (CLI and desktop app), [pi](https://github.com/earendil-works/pi) and the Codex CLI. In controlled A/B runs (18–30 consecutive coding tasks, 3 runs per arm) it cut cost by 7–22% with no loss in hidden acceptance tests or recall questions. Details: [docs/TEST-REPORT.md](docs/TEST-REPORT.md) (Chinese).
+**English** · [中文](https://github.com/coffeecoproject/SmartCompact/blob/main/README.zh-CN.md)
 
----
+[![npm](https://img.shields.io/npm/v/smartcompact)](https://www.npmjs.com/package/smartcompact)
+[![GitHub stars](https://img.shields.io/github/stars/coffeecoproject/SmartCompact?style=social)](https://github.com/coffeecoproject/SmartCompact/stargazers)
+[![License](https://img.shields.io/badge/license-MIT-blue)](https://github.com/coffeecoproject/SmartCompact/blob/main/LICENSE)
 
-让长会话早点、挑对时机压缩：降低成本，同时不损失结果。
+**SmartCompact lets long coding-agent sessions compact earlier, right after a piece of work is finished.** On 18–30 consecutive coding tasks it cut cost by **7–22%**, with no loss in hidden acceptance tests or recall questions ([test report](https://github.com/coffeecoproject/SmartCompact/blob/main/docs/TEST-REPORT.md), in Chinese).
 
-## 为什么
+Every request re-reads the whole context, so a long context makes every step expensive. Native auto-compaction waits until the context is nearly full (close to 1M tokens in Claude Code, up to 800k in Codex if configured), and it ignores timing, so it often lands in the middle of a task. SmartCompact works with Claude Code (CLI and desktop app), [Pi](https://github.com/earendil-works/pi) and the Codex CLI:
 
-agent 每发一次请求，都要把整段上下文重新读一遍。上下文越长，每一步越贵。原生的自动压缩通常要等到快满了才触发（Claude Code 接近 100 万，Codex 可以配到 80 万），在那之前每一步都在为很长的上下文付钱；而且原生压缩不看时机，常常发生在一件事做到一半的时候。
+- **Compact at the right moment.** Once the context passes the **allow line** (200k tokens by default), it waits for a piece of work to finish: a commit, tests passing, a task completed.
+- **Never in the middle of work.** It does not compact on its own mid-task, nor while tests or the build are failing, errors keep repeating, or a background job is running.
+- **A fallback.** If no good moment comes and the context passes the **grace line** (allow line × 1.3), it compacts at the end of a turn.
+- **A progress ledger bridges the gap.** Files changed, the latest commit and test result, and decisions the agent recorded are handed back to the model after compaction.
+- **No pointless compactions.** It skips compaction when it would not free enough space.
 
-SmartCompact 的做法：
+## Results
 
-- 上下文超过**允许压缩线**（默认 20 万）以后，等到**刚做完一件事**（一次提交、测试刚通过、任务完成）再压缩。
-- 不在一件事做到一半时主动压缩；测试失败、构建失败、连续报错或后台任务还在跑时也不压缩。
-- 一直等不到合适时机、上下文超过**宽限线**（允许压缩线 × 1.3）时，在一轮结束时压缩，作为兜底。
-- 压缩前后用一份**进度笔记**接上：改过的文件、最近的提交和测试结果、记下的决定，压缩后补回给模型。
-- 预计腾不出足够空间时不压缩，避免刚压缩完又压缩。
+The same codebase and 18–30 consecutive development tasks, where later tasks change the results of earlier ones; each platform run 3 times with and 3 times without SmartCompact. Acceptance is graded by hidden tests the model never sees; after each round the model answers recall questions, including details mentioned in passing much earlier.
 
-## 效果
-
-同一个代码库、连续 18～30 个开发任务（后面的任务会修改前面任务的结果），每个平台装与不装各跑 3 次。验收由脚本跑模型看不到的隐藏测试；每轮结束问几道记忆题，包括很早之前随口提到的细节。
-
-| 平台（模型） | 原生压缩点 | 成本 | 任务验收 | 记忆题 |
+| Platform (model) | Native compaction | Cost | Tasks accepted | Recall |
 |---|---|---|---|---|
-| Codex（gpt-6-astra） | 80 万 | **−19%** | 两组都 18/18 | 两组都 54/54 |
-| pi（gpt-5.5） | 约 25.6 万 | −11%～−22% | 两组都 18/18 | 原生 51/54，插件 53/54 |
-| Claude Code（Haiku 5.5，30 题） | 接近 100 万 | −7%（波动较大） | 两组都 30/30 | 两组都 90/90 |
+| Codex (gpt-6-astra) | 800k | **−19%** | 18/18 both | 54/54 both |
+| Pi (gpt-5.5) | about 256k | −11% to −22% | 18/18 both | native 51/54, SmartCompact 53/54 |
+| Claude Code (Haiku 5.5, 30 tasks) | close to 1M | −7% (noisy) | 30/30 both | 90/90 both |
 
-成本按各家价格比例折算成"缓存读取 token 当量"。规律：原生压缩得越晚、会话涨得越快，省得越多；会话没超过 20 万时插件不起作用，也没有坏处。完整方法、数据、代价和局限见 [docs/TEST-REPORT.md](docs/TEST-REPORT.md)。
+Cost is converted to cached-input-token equivalents using each provider's price ratios. The later native compaction kicks in and the faster a session grows, the more it saves. Below 200k SmartCompact does nothing, so it costs nothing either. After a compaction the model spends extra requests getting familiar with the code again; that is included in the cost above. These are small samples on one codebase and one kind of task; the [report](https://github.com/coffeecoproject/SmartCompact/blob/main/docs/TEST-REPORT.md) has the method, the data and the limitations.
 
-## 安装
+## Install
 
-### Claude Code（终端和桌面 App）
-
-需要 Claude Code ≥ 2.1.295。
+**Claude Code** (2.1.295 or later)
 
 ```
 /plugin marketplace add coffeecoproject/SmartCompact
 /plugin install smartcompact@smartcompact
 ```
 
-装好后新开会话生效。插件会把原生自动压缩线调到宽限线附近，`/smartcompact pause` 可以让当前会话恢复原生行为。
+It takes effect in new sessions. The plugin moves the native auto-compaction to about the grace line; `/smartcompact pause` returns the current session to native behavior.
 
-### pi
+**Pi**
 
-```bash
-pi install git:github.com/coffeecoproject/SmartCompact
+```
+pi install npm:smartcompact
 ```
 
-pi 默认配置下，插件在一轮结束（`agent_settled`）时挑阶段节点主动压缩。如果你把 `reserveTokens` 调大、让 pi 的原生压缩提前，插件会在那个点按工作状态决定是否推迟。
+With Pi's default settings, SmartCompact compacts at a finished piece of work when a turn ends (`agent_settled`). If you raise `reserveTokens` so that Pi's native compaction comes earlier, SmartCompact decides at that point whether to postpone it, based on the state of the work.
 
-### Codex 命令行
-
-需要 Node ≥ 22.18（直接运行 TypeScript）和 Codex CLI ≥ 0.162。
+**Codex CLI** (0.162 or later, Node.js 22.18 or later)
 
 ```bash
 git clone https://github.com/coffeecoproject/SmartCompact.git
@@ -61,47 +55,54 @@ cd SmartCompact
 node scripts/codex.ts install
 ```
 
-安装脚本只在 `~/.codex/config.toml`（或 `$CODEX_HOME/config.toml`）末尾写入一段带标记的 hook 配置，改之前备份原文件；`node scripts/codex.ts uninstall` 移除。下次启动 Codex 时按提示信任这 4 个 hook。升级 Node 或移动仓库后重新运行一次 install。
+The script only appends one marked block of hooks to `~/.codex/config.toml` (or `$CODEX_HOME/config.toml`), backing up the file first. Trust the 4 hooks when Codex asks on its next start. Run install again after upgrading Node or moving the repository.
 
-Codex 的 hook 不能推迟一轮中间的压缩，所以插件在一轮结束时判断，需要压缩就通过 Codex 的共享后台服务（交互界面默认会用它）在会话空闲时发起。`codex exec` 和 Codex App（ChatGPT.app）默认不走共享后台服务，这时插件只补回进度笔记，压缩仍按 Codex 原生规则。
+Codex hooks cannot postpone a compaction in the middle of a turn, so SmartCompact decides when a turn ends and, if it should compact, starts the compaction through Codex's shared background server once the session is idle (the interactive UI uses it by default). `codex exec` and the Codex App (ChatGPT.app) do not use the shared server by default; there SmartCompact only hands back the progress ledger, and compaction follows Codex's native rules.
 
-## 参数
+## Settings
 
-| 参数 | 默认 | 含义 |
+| Setting | Default | Meaning |
 |---|---|---|
-| 允许压缩线 | 200000 | 超过它且刚做完一件事时压缩 |
-| 宽限倍数 | 1.3 | 超过 允许压缩线 × 倍数 时不再等阶段节点 |
-| 最少腾出空间 | 60000 | 预计腾出的空间少于它时不压缩 |
+| Allow line | 200000 | Above it, compact right after a piece of work is finished |
+| Grace factor | 1.3 | Above allow line × factor, stop waiting for a finished piece of work |
+| Minimum freed | 60000 | Skip compaction if it is expected to free less than this |
 
-- Claude Code：安装插件时的配置项（`allowLineTokens`、`graceFactor`、`minFreedTokens`），留空用默认值。
-- pi：命令行开关 `--smartcompact-allow-line`、`--smartcompact-grace`、`--smartcompact-min-freed`。
-- Codex：环境变量 `SMARTCOMPACT_ALLOW_LINE`、`SMARTCOMPACT_GRACE`、`SMARTCOMPACT_MIN_FREED`。
+- Claude Code: the plugin options `allowLineTokens`, `graceFactor` and `minFreedTokens`; leave them empty for the defaults.
+- Pi: the flags `--smartcompact-allow-line`, `--smartcompact-grace` and `--smartcompact-min-freed`.
+- Codex: the environment variables `SMARTCOMPACT_ALLOW_LINE`, `SMARTCOMPACT_GRACE` and `SMARTCOMPACT_MIN_FREED`.
 
-## 查看效果
+## Seeing what it did
 
-- Claude Code 和 pi：`/smartcompact`（或 `/smartcompact report`）查看三条线、阶段节点计数和成本估算；`/smartcompact pause` / `resume` 暂停或恢复。Claude Code 和 pi 里模型还可以调用 checkpoint 工具记下决定，压缩后一起补回。
-- Codex：`node adapters/codex/report.ts <会话 ID>`，记录在 `~/.codex/smartcompact/`。
+- Claude Code and Pi: `/smartcompact` (or `/smartcompact report`) shows the three lines, the finished-work signals it saw and a cost estimate; `/smartcompact pause` and `resume` turn it off and on for the session. The model can also call a `checkpoint` tool to record decisions, which come back with the ledger after compaction.
+- Codex: `node adapters/codex/report.ts <session ID>`; records are kept in `~/.codex/smartcompact/`.
 
-## 局限
+## FAQ
 
-- 判断"刚做完一件事"靠识别命令：提交只要真的执行了 `git commit` 且没报错就算；测试命令接了管道（`| tail`）又没开 `pipefail` 时退出码不可信，不算测试结果。
-- 进度笔记只记文件、提交、测试和模型主动记下的决定。用户在对话里随口交代的细节靠压缩时的说明要求摘要保留，pi 上能明显减少丢失，但不能保证不丢。
-- Claude Code 上，插件的兜底压缩点和它调整后的原生压缩点接近；长时间认不出阶段节点时，可能由原生压缩在一轮中间触发。
-- 评测只用了一个代码库和一种任务类型，Claude 只测了 Haiku。
+**How does it know a piece of work is finished?** From the commands the agent runs. A commit counts if `git commit` actually ran and the tool call did not fail. A test command piped into something else (`| tail`) without `pipefail` does not count, since its exit code cannot be trusted.
 
-## 开发
+**Will the model forget things after compaction?** The ledger only records files, commits, tests and decisions the model chose to record. Details the user mentions in passing are kept by asking the compaction summary to keep every specific fact the user stated. On Pi this clearly reduced losses, but it is not a guarantee.
+
+**Anything specific to Claude Code?** SmartCompact's fallback point is close to the native compaction point it moves. If it cannot recognize a finished piece of work for a long time, native compaction may still fire mid-turn.
+
+**How do I remove it?**
+
+- Claude Code: `/plugin uninstall smartcompact@smartcompact`.
+- Pi: `pi remove npm:smartcompact`.
+- Codex: `node scripts/codex.ts uninstall` in the repository.
+
+## Development
 
 ```bash
 sh scripts/check.sh
 ```
 
-结构校验、core 依赖边界检查和全部测试。目录：
+This runs the structure checks, the core dependency boundary check and all tests. Layout:
 
-- `plugin/`：Claude Code 插件；`plugin/src/core/` 是和平台无关的决策、信号、进度笔记和成本估算，其他适配都复用它。
-- `adapters/pi/`、`adapters/codex/`：pi 和 Codex 的适配。
-- `eval/`：对照评测脚本（Claude、pi、Codex 各一个），任务格式见 `eval/day.py`；评测用的题目和隐藏测试涉及内部项目，没有放进仓库。
-- `DESIGN.md`：设计说明；`docs/TEST-REPORT.md`：测试报告。
+- `plugin/`: the Claude Code plugin. `plugin/src/core/` holds the platform-independent decisions, signals, ledger and cost estimate that every adapter reuses.
+- `adapters/pi/`, `adapters/codex/`: the Pi and Codex adapters.
+- `eval/`: the A/B evaluation scripts (one each for Claude, Pi and Codex); the task format is described in `eval/day.py`. The tasks and hidden tests come from an internal project and are not published.
+- `DESIGN.md`: design notes; `docs/TEST-REPORT.md`: the test report (both in Chinese).
 
-## 许可证
+## License
 
-[MIT](LICENSE)
+MIT. See [LICENSE](https://github.com/coffeecoproject/SmartCompact/blob/main/LICENSE).
