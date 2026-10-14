@@ -1,0 +1,27 @@
+{
+  "name": "smartcompact",
+  "version": "0.1.0",
+  "description": "在不损失结果的前提下，让长会话早点压缩、降低成本",
+  "author": {
+    "name": "coffeecoproject"
+  },
+  "homepage": "https://github.com/coffeecoproject/SmartCompact",
+  "license": "MIT",
+  "userConfig": {
+    "allowLineTokens": {
+      "type": "number",
+      "title": "允许压缩线（token）",
+      "description": "一轮结束时，上下文超过这个值且刚完成一块工作，才会压缩。留空使用默认值"
+    },
+    "graceFactor": {
+      "type": "number",
+      "title": "宽限倍数",
+      "description": "超过 允许压缩线 × 这个倍数 时，不再等阶段节点。留空使用默认值"
+    },
+    "minFreedTokens": {
+      "type": "number",
+      "title": "最少腾出空间（token）",
+      "description": "预计腾出的空间少于这个值时不压缩，防止连续压缩。留空使用默认值"
+    }
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "smartcompact",
+  "description": "SmartCompact：让长会话在刚做完一件事时早点压缩，降低成本、不损失结果",
+  "owner": {
+    "name": "coffeecoproject"
+  },
+  "plugins": [
+    {
+      "name": "smartcompact",
+      "source": "./plugin",
+      "description": "在不损失结果的前提下，让长会话早点压缩、降低成本"
+    }
+  ]
+}
