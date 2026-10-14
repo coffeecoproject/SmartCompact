@@ -57,7 +57,7 @@ node scripts/codex.ts install
 
 The script only appends one marked block of hooks to `~/.codex/config.toml` (or `$CODEX_HOME/config.toml`), backing up the file first. Trust the 4 hooks when Codex asks on its next start. Run install again after upgrading Node or moving the repository.
 
-Codex hooks cannot postpone a compaction in the middle of a turn, so SmartCompact decides when a turn ends and, if it should compact, starts the compaction through Codex's shared background server once the session is idle (the interactive UI uses it by default). `codex exec` and the Codex App (ChatGPT.app) do not use the shared server by default; there SmartCompact only hands back the progress ledger, and compaction follows Codex's native rules.
+Codex hooks cannot postpone a compaction in the middle of a turn, so SmartCompact decides when a turn ends and, if it should compact, starts the compaction through Codex's shared background server once the session is idle (the interactive UI uses it by default). `codex exec` does not use the shared server by default, and the Codex App (ChatGPT.app) currently cannot; there SmartCompact only hands back the progress ledger, and compaction follows Codex's native rules. For a fallback there, add Codex's own `model_post_turn_compact_threshold_percent` at the top of `config.toml`: it compacts after a turn ends once the context passes that percentage of the usable window (31 is about 260k for an 872k window; see the test report).
 
 ## Settings
 

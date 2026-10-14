@@ -57,7 +57,7 @@ node scripts/codex.ts install
 
 安装脚本只在 `~/.codex/config.toml`（或 `$CODEX_HOME/config.toml`）末尾写入一段带标记的 hook 配置，改之前备份原文件。下次启动 Codex 时按提示信任这 4 个 hook。升级 Node 或移动仓库后重新运行一次 install。
 
-Codex 的 hook 不能推迟一轮中间的压缩，所以插件在一轮结束时判断，需要压缩就通过 Codex 的共享后台服务（交互界面默认会用它）在会话空闲时发起。`codex exec` 和 Codex App（ChatGPT.app）默认不走共享后台服务，这时插件只补回进度笔记，压缩仍按 Codex 原生规则。
+Codex 的 hook 不能推迟一轮中间的压缩，所以插件在一轮结束时判断，需要压缩就通过 Codex 的共享后台服务（交互界面默认会用它）在会话空闲时发起。`codex exec` 默认不走共享后台服务，Codex App（ChatGPT.app）目前走不了，这时插件只补回进度笔记，压缩仍按 Codex 原生规则。想给它们也加个兜底，可以在 `config.toml` 顶部加上 Codex 自带的 `model_post_turn_compact_threshold_percent`：上下文超过可用窗口的这个百分比时，在一轮结束后压缩（窗口 87.2 万时设 31，约 26 万；详见测试报告）。
 
 ## 参数
 
