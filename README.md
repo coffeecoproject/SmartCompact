@@ -9,7 +9,7 @@
 <p align="center"><a href="https://github.com/coffeecoproject/SmartCompact/raw/main/docs/media/smartcompact-en.mp4"><img src="https://raw.githubusercontent.com/coffeecoproject/SmartCompact/main/docs/media/cover-en.jpg" alt="SmartCompact in 90 seconds (video)" width="100%"></a></p>
 <p align="center"><sub>▶ Watch the 90-second explainer (click the image to play)</sub></p>
 
-**SmartCompact lets long coding-agent sessions compact earlier, at a pause after a piece of work is finished.** On 18–60 consecutive coding tasks it cut cost by **7–44%** with no loss in hidden acceptance tests; the longer the session, the more it saves. In the longest runs (60 tasks, native sessions reaching 820k–960k tokens) the model missed 6 of 180 recall questions about details mentioned in passing much earlier ([test report](https://github.com/coffeecoproject/SmartCompact/blob/main/docs/TEST-REPORT.md), in Chinese).
+**SmartCompact lets long coding-agent sessions compact earlier, at a pause after a piece of work is finished.** On 18–60 consecutive coding tasks it cut cost by **7–44%** with no loss in hidden acceptance tests; the longer the session, the more it saves. In the longest runs (60 tasks, native sessions reaching 820k–960k tokens) the model missed 6 of 180 recall questions about details mentioned in passing much earlier ([how it was tested](https://github.com/coffeecoproject/SmartCompact/blob/main/docs/EVALUATION.md)).
 
 Every request re-reads the whole context, so a long context makes every step expensive. Native auto-compaction waits until the context is nearly full (close to 1M tokens in Claude Code, up to 800k in Codex if configured), and it ignores timing, so it often lands in the middle of a task. SmartCompact works with Claude Code (CLI and desktop app), [Pi](https://github.com/earendil-works/pi) and the Codex CLI:
 
@@ -30,7 +30,7 @@ The same codebase and 18–30 consecutive development tasks, where later tasks c
 | Claude Code (Haiku 5.5, 30 tasks) | close to 1M | −7% (noisy) | 30/30 both | 90/90 both |
 | Claude Code (Haiku 5.5, 60 tasks) | close to 1M | **−44%** | native 59–60/60, SmartCompact 60/60 | native 180/180, SmartCompact 174/180 |
 
-Cost is converted to cached-input-token equivalents using each provider's price ratios. The later native compaction kicks in and the faster a session grows, the more it saves. Below 200k SmartCompact does nothing, so it costs nothing either. After a compaction the model spends extra requests getting familiar with the code again; that is included in the cost above. These are small samples on one codebase and one kind of task; the [report](https://github.com/coffeecoproject/SmartCompact/blob/main/docs/TEST-REPORT.md) has the method, the data and the limitations.
+Cost is converted to cached-input-token equivalents using each provider's price ratios. The later native compaction kicks in and the faster a session grows, the more it saves. Below 200k SmartCompact does nothing, so it costs nothing either. After a compaction the model spends extra requests getting familiar with the code again; that is included in the cost above. These are small samples on one codebase and one kind of task; the [evaluation](https://github.com/coffeecoproject/SmartCompact/blob/main/docs/EVALUATION.md) has the method, the data and the limitations.
 
 ## Install
 
@@ -105,7 +105,7 @@ This runs the structure checks, the core dependency boundary check and all tests
 - `plugin/`: the Claude Code plugin. `plugin/src/core/` holds the platform-independent decisions, signals, ledger and cost estimate that every adapter reuses.
 - `adapters/pi/`, `adapters/codex/`: the Pi and Codex adapters.
 - `eval/`: the A/B evaluation scripts (one each for Claude, Pi and Codex); the task format is described in `eval/day.py`. The tasks and hidden tests come from an internal project and are not published.
-- `DESIGN.md`: design notes; `docs/TEST-REPORT.md`: the test report (both in Chinese).
+- `docs/EVALUATION.md`: how the A/B runs were done and their results. `DESIGN.md`: design notes and `docs/TEST-REPORT.md`: the full test report (both in Chinese).
 
 ## License
 

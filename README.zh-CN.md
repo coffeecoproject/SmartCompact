@@ -105,7 +105,7 @@ sh scripts/check.sh
 - `plugin/`：Claude Code 插件；`plugin/src/core/` 是和平台无关的决策、信号、进度笔记和成本估算，其他适配都复用它。
 - `adapters/pi/`、`adapters/codex/`：Pi 和 Codex 的适配。
 - `eval/`：对照评测脚本（Claude、Pi、Codex 各一个），任务格式见 `eval/day.py`；评测用的题目和隐藏测试来自内部项目，没有放进仓库。
-- `DESIGN.md`：设计说明；`docs/TEST-REPORT.md`：测试报告。
+- `DESIGN.md`：设计说明；`docs/TEST-REPORT.md`：测试报告；`docs/EVALUATION.md`：对照评测的英文说明。
 
 ## 许可证
 
