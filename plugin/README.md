@@ -8,12 +8,22 @@ In a 60-task A/B run on Claude Haiku it cut estimated cost by 44% with no loss i
 
 Everything runs locally inside Claude Code. **The plugin makes no network requests and starts no processes.**
 
-- **Hooks** (one module, `hooks/register.ts`): session start, prompt submit, tool calls, task created/completed, stop, turn complete and compaction.
-- **Reads**: the session's token usage; the tool name, input and success of each tool call, to recognize work: file paths from Edit/Write, Bash command text (to recognize `git commit` and test or build commands, and whether they failed), the `[branch hash] message` line from a commit's output, TodoWrite items and task events. It does not read file contents, and nothing it reads leaves the machine.
+- **Reads**: the session's token usage; the tool name, input and success of each tool call, to recognize work: file paths from Edit/Write, Bash command text (to recognize `git commit` and test or build commands, and whether they failed), the `[branch hash] message` line from a commit's output, TodoWrite items and task events. It reads no credentials or tokens and no file contents, and nothing it reads leaves the machine.
 - **Writes**:
   - the plugin's own storage (`$.store`): per-session state and the progress ledger (file paths, the latest commit line, the latest test command and result, in-progress task names, notes recorded with the `checkpoint` tool) and a short decision log. Old session records are pruned automatically.
-  - the environment variable `CLAUDE_CODE_AUTO_COMPACT_WINDOW` for the session, to move Claude Code's native auto-compaction close to the fallback line. Processes started from the session (for example `claude -p`) inherit it.
-- **Actions**: compacts the session (or queues `/compact` in headless sessions) when the rules above say so; registers a `checkpoint` tool and a `/smartcompact` command.
+  - the environment variable `CLAUDE_CODE_AUTO_COMPACT_WINDOW`: at session start it reads the current value and sets it so that Claude Code's native auto-compaction sits close to SmartCompact's fallback line (about 293000 with default settings). `/smartcompact pause` puts the original value back. Processes started from the session (for example `claude -p`) inherit it.
+
+### What each hook does
+
+All hooks live in one module, `hooks/register.ts`.
+
+- **Session start**: registers the `checkpoint` tool and the `/smartcompact` command, and sets the environment variable above.
+- **`/smartcompact` command**: answers only its own command (`report`, `pause`, `resume`).
+- **Tool calls**: answers calls to its own `checkpoint` tool by recording the note. For every other tool it only looks at the result to recognize commits, tests, builds and edited files, and passes the result through unchanged.
+- **Task created / completed**: keeps the list of in-progress task names for the ledger.
+- **Prompt submit**: adds context to the turn, never changes the user's message. After a compaction it adds the progress ledger; once per cycle, when the context nears the allow line, it adds a one-line reminder to record progress with `checkpoint`.
+- **Stop / turn complete**: decides whether to compact. When it should, it compacts the session. Where a session cannot compact directly (headless sessions such as the desktop app), it runs the `/compact` command itself with SmartCompact's compaction instructions; it runs no other commands.
+- **Compaction**: when Claude Code's native auto-compaction starts mid-turn, it defers it while tests or the build are failing, errors repeat, a background job is running, or too little would be freed, and always lets it through near the context limit. After any compaction it attaches the progress ledger. Subagent compactions are left alone.
 
 ## Use
 
