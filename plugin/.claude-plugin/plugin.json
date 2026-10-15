@@ -1,27 +1,32 @@
 {
   "name": "smartcompact",
-  "version": "0.1.0",
-  "description": "在不损失结果的前提下，让长会话早点压缩、降低成本",
+  "displayName": "SmartCompact",
+  "version": "0.1.2",
+  "description": "Compacts long sessions earlier, at a pause after a commit or passing tests, to cut cost without losing results",
   "author": {
     "name": "coffeecoproject"
   },
   "homepage": "https://github.com/coffeecoproject/SmartCompact",
+  "repository": "https://github.com/coffeecoproject/SmartCompact",
+  "supportUrl": "https://github.com/coffeecoproject/SmartCompact/issues",
+  "privacyPolicyUrl": "https://github.com/coffeecoproject/SmartCompact/blob/main/plugin/README.md#what-it-runs-reads-and-writes",
   "license": "MIT",
+  "keywords": ["compaction", "context", "cost", "long sessions", "tokens"],
   "userConfig": {
     "allowLineTokens": {
       "type": "number",
-      "title": "允许压缩线（token）",
-      "description": "一轮结束时，上下文超过这个值且刚完成一块工作，才会压缩。留空使用默认值"
+      "title": "Allow line (tokens)",
+      "description": "Above this context size, compact at the end of a turn once a piece of work has been finished. Leave empty for the default (200000)"
     },
     "graceFactor": {
       "type": "number",
-      "title": "宽限倍数",
-      "description": "超过 允许压缩线 × 这个倍数 时，不再等阶段节点。留空使用默认值"
+      "title": "Grace factor",
+      "description": "Above allow line × this factor, stop waiting for a finished piece of work. Leave empty for the default (1.3)"
     },
     "minFreedTokens": {
       "type": "number",
-      "title": "最少腾出空间（token）",
-      "description": "预计腾出的空间少于这个值时不压缩，防止连续压缩。留空使用默认值"
+      "title": "Minimum freed (tokens)",
+      "description": "Skip compaction if it is expected to free less than this. Leave empty for the default (60000)"
     }
   }
 }

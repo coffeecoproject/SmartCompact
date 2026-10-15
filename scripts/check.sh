@@ -22,8 +22,8 @@ echo "Codex 适配模块加载：通过"
 node -e "
 const fs = require('fs')
 for (const f of ['.agents/plugins/marketplace.json', '.codex-plugin/plugin.json', 'adapters/codex/hooks.json']) JSON.parse(fs.readFileSync(f, 'utf8'))
-const [pkg, codex] = ['package.json', '.codex-plugin/plugin.json'].map(f => JSON.parse(fs.readFileSync(f, 'utf8')).version)
-if (pkg !== codex) { console.error('版本不一致：package.json ' + pkg + '，.codex-plugin/plugin.json ' + codex); process.exit(1) }
+const [pkg, codex, claude] = ['package.json', '.codex-plugin/plugin.json', 'plugin/.claude-plugin/plugin.json'].map(f => JSON.parse(fs.readFileSync(f, 'utf8')).version)
+if (pkg !== codex || pkg !== claude) { console.error('版本不一致：package.json ' + pkg + '，.codex-plugin/plugin.json ' + codex + '，plugin/.claude-plugin/plugin.json ' + claude); process.exit(1) }
 "
 sh -n adapters/codex/hook.sh
 echo "Codex 插件清单：通过"
