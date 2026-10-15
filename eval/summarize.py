@@ -41,7 +41,9 @@ def row(run: dict) -> dict:
         'nudges': sum(task['nudges'] for task in run['tasks']),
         'accepted': sum(task['accepted'] for task in hidden.values()), 'hidden_fail': sum(task['fail'] for task in hidden.values()),
         'recall': sum(sum(r['score'].values()) for r in run['recalls']), 'recall_total': sum(len(r['score']) for r in run['recalls']),
-        'suite_fail': {name: suite['fail'] for name, suite in run['acceptance']['suites'].items() if suite['fail']},
+        # 一个测试都没跑起来（多半是编译不过）也算失败
+        'suite_fail': {name: suite['fail'] or 'no tests ran' for name, suite in run['acceptance']['suites'].items()
+                       if suite['fail'] or not suite['tests']},
     }
 
 

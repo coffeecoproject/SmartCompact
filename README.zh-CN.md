@@ -6,7 +6,7 @@
 [![GitHub stars](https://img.shields.io/github/stars/coffeecoproject/SmartCompact?style=social)](https://github.com/coffeecoproject/SmartCompact/stargazers)
 [![License](https://img.shields.io/badge/license-MIT-blue)](https://github.com/coffeecoproject/SmartCompact/blob/main/LICENSE)
 
-**SmartCompact 让编程 agent 的长会话早点压缩，挑在刚做完一件事的时候。** 在 18～30 个连续开发任务上，成本降低 **7%～22%**，隐藏验收测试和记忆题都没有损失（[测试报告](https://github.com/coffeecoproject/SmartCompact/blob/main/docs/TEST-REPORT.md)）。
+**SmartCompact 让编程 agent 的长会话早点压缩，挑在刚做完一件事的时候。** 在 18～60 个连续开发任务上，成本降低 **7%～44%**，隐藏验收测试没有损失，会话越长省得越多。最长的一组（60 个任务，原生组上下文到 82 万～96 万）里，很早之前随口提到的细节，180 道记忆题少答对 6 道（[测试报告](https://github.com/coffeecoproject/SmartCompact/blob/main/docs/TEST-REPORT.md)）。
 
 agent 每发一次请求，都要把整段上下文重新读一遍，上下文越长，每一步越贵。原生的自动压缩要等到快满了才触发（Claude Code 接近 100 万，Codex 可以配到 80 万），而且不看时机，常常发生在一件事做到一半的时候。SmartCompact 支持 Claude Code（终端和桌面 App）、[Pi](https://github.com/earendil-works/pi) 和 Codex 命令行：
 
@@ -25,6 +25,7 @@ agent 每发一次请求，都要把整段上下文重新读一遍，上下文�
 | Codex（gpt-6-astra） | 80 万 | **−19%** | 两组都 18/18 | 两组都 54/54 |
 | Pi（gpt-5.5） | 约 25.6 万 | −11%～−22% | 两组都 18/18 | 原生 51/54，插件 53/54 |
 | Claude Code（Haiku 5.5，30 个任务） | 接近 100 万 | −7%（波动较大） | 两组都 30/30 | 两组都 90/90 |
+| Claude Code（Haiku 5.5，60 个任务） | 接近 100 万 | **−44%** | 原生 59～60/60，插件 60/60 | 原生 180/180，插件 174/180 |
 
 成本按各家价格比例折算成"缓存读取 token 当量"。原生压缩得越晚、会话涨得越快，省得越多；会话没超过 20 万时插件不起作用，也没有额外开销。压缩后模型要多花一些请求重新熟悉代码，这部分已计入上面的成本。样本小，只用了一个代码库和一种任务类型；方法、数据和局限见[测试报告](https://github.com/coffeecoproject/SmartCompact/blob/main/docs/TEST-REPORT.md)。
 
@@ -80,9 +81,9 @@ Codex 的 hook 不能推迟一轮中间的压缩，所以插件在一轮结束�
 
 **怎么判断"刚做完一件事"？** 靠识别 agent 执行的命令。提交只要真的执行了 `git commit` 且工具调用没报错就算；测试命令接了管道（`| tail`）又没开 `pipefail` 时退出码不可信，不算测试结果。
 
-**压缩后模型会不会忘事？** 进度笔记只记文件、提交、测试和模型主动记下的决定。用户在对话里随口交代的细节，靠压缩时要求摘要原样保留用户说过的具体信息。Pi 上这样做明显减少了丢失，但不能保证不丢。
+**压缩后模型会不会忘事？** 随口提到的细节有时会丢。进度笔记只记文件、提交、测试和模型主动记下的决定。用户在对话里随口交代的细节，靠压缩时要求摘要原样保留用户说过的具体信息。Pi 上这样做明显减少了丢失，但不能保证不丢。
 
-**Claude Code 上有什么要注意的？** 插件的兜底压缩点和它调整后的原生压缩点接近；长时间认不出刚做完一件事时，原生压缩仍可能在一轮中间触发。
+**Claude Code 上有什么要注意的？** 插件的兜底压缩点和它调整后的原生压缩点接近；长时间认不出刚做完一件事时，原生压缩仍可能在一轮中间触发。插件是通过在会话里设置 `CLAUDE_CODE_AUTO_COMPACT_WINDOW` 来调整原生压缩点的，从这个会话里启动的进程会继承它：agent 运行的 `claude -p` 或脚本里启动的 Claude，也会在 26 万左右压缩。需要的话，启动这类进程前去掉这个变量。
 
 **怎么卸载？**
 

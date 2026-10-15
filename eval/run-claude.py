@@ -26,6 +26,10 @@ parser.add_argument('--model', default='haiku')
 parser.add_argument('--day', default=DAY)
 parser.add_argument('--rounds', type=int, help='只做前几轮，不填为全部')
 args = parser.parse_args()
+# 模型在会话里跑的命令继承这里的 PATH；被测项目要求 Node 22，用错版本时测试跑不起来，整次结果不可比
+node = subprocess.run(['node', '--version'], capture_output=True, text=True).stdout.strip()
+if not node.startswith('v22.'):
+    sys.exit(f'PATH 里的 node 是 {node or "（找不到）"}，需要 v22')
 day = load_day(args.day, args.rounds)
 
 work = prepare_workspace(day, args.name)
@@ -38,7 +42,9 @@ if args.arm == 'plugin':
     cmd += ['--plugin-dir', os.path.join(ROOT, 'plugin')]
 
 log = open(os.path.join(RESULTS, f'{args.name}.events.jsonl'), 'w', encoding='utf-8')
-proc = subprocess.Popen(cmd, cwd=work, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+# 从装了 SmartCompact 的会话里启动时，会继承它调低的原生压缩线；两组都要从 Claude 的默认值开始。
+env = {key: value for key, value in os.environ.items() if key != 'CLAUDE_CODE_AUTO_COMPACT_WINDOW'}
+proc = subprocess.Popen(cmd, cwd=work, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
 lock = threading.Condition()
 state = {'results': 0, 'compacting': False, 'boundaries': 0, 'last_text': '', 'context': 0, 'task': None, 'model': None}
 usage = {'timeline': [], 'compactions': [], 'turns': {'input_tokens': 0, 'cache_read_input_tokens': 0, 'cache_creation_input_tokens': 0, 'output_tokens': 0}}
@@ -72,7 +78,10 @@ def on_event(event: dict) -> None:
         usage['compactions'].append({'t': round(time.time() - started, 1), 'task': state['task'], 'before': metadata.get('pre_tokens', state['context']),
                                      'trigger': metadata.get('trigger')})
     elif kind == 'result':
-        state['results'] += 1
+        # 插件排队的 /compact 也会发一条 result（num_turns 为 0）；它不是对我们消息的回答，不计入轮次。
+        # 机器很忙时压缩开始得晚，消息会排在它后面，按轮次等待就不会把压缩的空结果当成回答。
+        if event.get('num_turns') != 0:
+            state['results'] += 1
         for key in usage['turns']:
             usage['turns'][key] += (event.get('usage') or {}).get(key, 0) or 0
 
