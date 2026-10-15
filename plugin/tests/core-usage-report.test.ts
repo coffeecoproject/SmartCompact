@@ -2,7 +2,7 @@ import { describe, expect, test } from 'claude-code/testing'
 import { shouldNudge } from '../src/core/decide.ts'
 import { DEFAULT_PARAMS } from '../src/core/params.ts'
 import { countDecisions, renderReport } from '../src/core/report.ts'
-import { growthSinceMilestone, INITIAL_SESSION_STATE, withCompaction, withSample, withSignals } from '../src/core/state.ts'
+import { growthSinceMilestone, INITIAL_SESSION_STATE, type SessionState, withCompaction, withSample, withSignals } from '../src/core/state.ts'
 import { EMPTY_TALLY, pricesFor, recordCompaction, recordSample, savingsRatio } from '../src/core/usage.ts'
 
 const CEILING = 967_000
@@ -123,6 +123,14 @@ describe('报告', () => {
     expect(text).toContain('插件压缩 2')
     expect(text).toContain('任务完成 0')
     expect(text).toContain('还没有读数')
+  })
+
+  test('当前状态区分已到阶段节点和之后又改了文件', () => {
+    const status = (work: Partial<SessionState['work']>) =>
+      renderReport({ state: { ...INITIAL_SESSION_STATE, work: { ...INITIAL_SESSION_STATE.work, ...work } }, lines: { allow: 200_000, ceiling: 967_000 }, tokens: 250_000, counts: {} })
+    expect(status({ milestone: 'commit' })).toContain('已到阶段节点（commit）')
+    expect(status({ milestone: 'commit', changedSinceMilestone: true })).toContain('之后又改了文件')
+    expect(status({})).toContain('等待阶段节点')
   })
 
   test('刚压缩完估算为负时说明原因', () => {

@@ -20,6 +20,7 @@ export function recognizePi(outcome: PiToolOutcome, ledger: Ledger): { signals: 
   const { path, command } = outcome.input
   if (EDIT_TOOLS.has(outcome.toolName) && !outcome.isError && typeof path === 'string' && path) {
     next = recordFileChanged(next, path)
+    signals.push({ kind: 'file-changed' })
   }
   if (outcome.toolName === 'bash' && typeof command === 'string' && command) {
     const classified = classifyCommand(command, outcome.isError, outcome.text, next)

@@ -24,7 +24,10 @@ export function recognize(outcome: ToolOutcome, ledger: Ledger): Recognized {
 
   if (EDIT_TOOLS.has(outcome.tool) && !outcome.isError) {
     const path = text(outcome.input.file_path) ?? text(outcome.input.notebook_path)
-    if (path) next = recordFileChanged(next, path)
+    if (path) {
+      next = recordFileChanged(next, path)
+      signals.push({ kind: 'file-changed' })
+    }
   }
 
   if (outcome.tool === 'TodoWrite' && Array.isArray(outcome.input.todos)) {

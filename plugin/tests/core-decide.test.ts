@@ -37,6 +37,13 @@ describe('一轮结束时', () => {
     expect(decideAtTurnEnd(input(210_000, { milestone: 'commit', errorStreak: 3 }), params).reason).toBe('error-streak')
   })
 
+  test('做完一件事之后又改了文件，等下一件事做完', () => {
+    expect(decideAtTurnEnd(input(320_000, { milestone: 'checkpoint', changedSinceMilestone: true }), params)).toEqual({
+      action: 'wait',
+      reason: 'changed-since-milestone',
+    })
+  })
+
   test('没有阶段节点时一直等待，不设插件自己的兜底，交给原生在上限处压缩', () => {
     expect(decideAtTurnEnd(input(230_000), params)).toEqual({ action: 'wait', reason: 'waiting-for-milestone' })
     expect(decideAtTurnEnd(input(600_000), params)).toEqual({ action: 'wait', reason: 'waiting-for-milestone' })

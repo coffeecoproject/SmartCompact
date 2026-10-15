@@ -1,7 +1,7 @@
 {
   "name": "smartcompact",
   "displayName": "SmartCompact",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Compacts long sessions earlier, at a pause after a commit or passing tests, to cut cost without losing results",
   "author": {
     "name": "coffeecoproject"

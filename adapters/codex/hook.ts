@@ -61,11 +61,15 @@ function absorbRollout(session: CodexSession, payload: Payload): { session: Code
   for (const tokens of delta.tokens) state = withSample(state, tokens, ceiling, pricesFor(payload.model ?? 'openai'))
   let ledger = state.ledger
   const signals: Signal[] = []
-  for (const file of delta.files) ledger = recordFileChanged(ledger, file)
-  for (const command of delta.commands) {
-    const isError = command.exitCode !== undefined && command.exitCode !== 0
+  for (const step of delta.steps) {
+    if (step.kind === 'files') {
+      for (const file of step.paths) ledger = recordFileChanged(ledger, file)
+      signals.push({ kind: 'file-changed' })
+      continue
+    }
+    const isError = step.exitCode !== undefined && step.exitCode !== 0
     signals.push({ kind: 'tool-result', isError })
-    const classified = classifyCommand(command.command, isError, command.output, ledger)
+    const classified = classifyCommand(step.command, isError, step.output, ledger)
     signals.push(...classified.signals)
     ledger = classified.ledger
   }

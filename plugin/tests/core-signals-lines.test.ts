@@ -34,6 +34,20 @@ describe('信号', () => {
     expect(hardSignal(run([{ kind: 'tests', passed: false }, { kind: 'checkpoint', milestone: false }]), DEFAULT_PARAMS)).toBe('tests-failing')
   })
 
+  test('做完一件事之后又改文件，这个阶段节点不再算数；再做完一件事又算数', () => {
+    const changed = run([{ kind: 'commit' }, { kind: 'file-changed' }])
+    expect(changed.milestone).toBe('commit')
+    expect(changed.changedSinceMilestone).toBe(true)
+    expect(applySignal(changed, { kind: 'tests', passed: true }).changedSinceMilestone).toBe(false)
+    expect(applySignal(changed, { kind: 'checkpoint', milestone: false }).changedSinceMilestone).toBe(true)
+    expect(afterCompaction(changed).changedSinceMilestone).toBe(false)
+  })
+
+  test('先改文件再做完一件事，阶段节点照常算数', () => {
+    expect(run([{ kind: 'file-changed' }, { kind: 'commit' }]).changedSinceMilestone).toBe(false)
+    expect(run([{ kind: 'file-changed' }]).changedSinceMilestone).toBe(false)
+  })
+
   test('压缩后清空阶段节点，仍然成立的失败保留', () => {
     const state = afterCompaction(run([{ kind: 'commit' }, { kind: 'build', passed: false }]))
     expect(state.milestone).toBeNull()

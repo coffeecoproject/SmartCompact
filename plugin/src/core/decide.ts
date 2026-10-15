@@ -17,7 +17,7 @@ export type DecisionInput = {
 
 export type TurnEndDecision =
   | { action: 'none'; reason: 'paused' | 'no-reading' | 'below-line' }
-  | { action: 'wait'; reason: HardSignal | 'insufficient-benefit' | 'waiting-for-milestone' }
+  | { action: 'wait'; reason: HardSignal | 'insufficient-benefit' | 'changed-since-milestone' | 'waiting-for-milestone' }
   | { action: 'compact'; reason: MilestoneSource }
 
 export type MidTurnDecision =
@@ -36,7 +36,9 @@ export function decideAtTurnEnd(input: DecisionInput, params: Params): TurnEndDe
   const hard = hardSignal(work, params)
   if (hard) return { action: 'wait', reason: hard }
   if (!freesEnough(tokens, input, params)) return { action: 'wait', reason: 'insufficient-benefit' }
-  if (work.milestone) return { action: 'compact', reason: work.milestone }
+  if (work.milestone && !work.changedSinceMilestone) return { action: 'compact', reason: work.milestone }
+  // 做完一件事之后又改了文件，已经在做下一件事，等它做完。
+  if (work.milestone) return { action: 'wait', reason: 'changed-since-milestone' }
   // 不设兜底线：一直等不到做完一件事，多半是在做一件大活，正需要大上下文；交给原生在上限处压缩。
   return { action: 'wait', reason: 'waiting-for-milestone' }
 }

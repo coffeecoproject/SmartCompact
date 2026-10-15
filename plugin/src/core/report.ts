@@ -1,6 +1,7 @@
 // /smartcompact report 的内容：当前状态、决策次数、信号次数、成本估算。只排版，不读写。
 
 import type { Lines } from './lines.ts'
+import type { WorkState } from './signals.ts'
 import type { DecisionLogEntry, SessionState } from './state.ts'
 import { savingsRatio } from './usage.ts'
 
@@ -18,6 +19,9 @@ export function countDecisions(entries: readonly DecisionLogEntry[]): DecisionCo
 
 const k = (tokens: number | undefined): string => (tokens === undefined ? '—' : `${Math.round(tokens / 1000)}k`)
 
+const milestoneStatus = (work: WorkState): string =>
+  !work.milestone ? '等待阶段节点' : work.changedSinceMilestone ? `上一件事已做完（${work.milestone}），之后又改了文件，等这件事做完` : `已到阶段节点（${work.milestone}）`
+
 export function renderReport(input: {
   state: SessionState
   lines: Lines
@@ -33,7 +37,7 @@ export function renderReport(input: {
     `- 本会话压缩 ${state.compactions} 次；最近一次压缩后约 ${k(state.measuredAfterTokens)}`,
     `- 本会话决策：插件压缩 ${(counts['compacted:plugin'] ?? 0) + (counts['compacted:plugin-queued'] ?? 0)}，自动压缩放行 ${counts['compacted:auto'] ?? 0}，手动压缩 ${counts['compacted:manual'] ?? 0}，轮中否决 ${counts['mid-turn:veto'] ?? 0}，轮末等待 ${counts['turn-end:wait'] ?? 0}`,
     `- 信号：提交 ${seen.commit}，测试通过 ${seen['tests-passed']}，任务完成 ${seen['task-completed']}，checkpoint 完成 ${seen.checkpoint}`,
-    `- 当前状态：${state.work.milestone ? `已到阶段节点（${state.work.milestone}）` : '等待阶段节点'}${state.work.testsFailing ? '，测试失败中' : ''}${state.work.buildFailing ? '，构建失败中' : ''}`,
+    `- 当前状态：${milestoneStatus(state.work)}${state.work.testsFailing ? '，测试失败中' : ''}${state.work.buildFailing ? '，构建失败中' : ''}`,
     ratio === undefined
       ? '- 成本估算：还没有读数'
       : `- 成本估算：上下文成本约节省 ${Math.round(ratio * 100)}%（${state.usage.samples} 次读数，已扣除压缩本身的开销；对比的是没有插件、一直涨到原生压缩点的情况）${

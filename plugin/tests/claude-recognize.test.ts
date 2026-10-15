@@ -63,10 +63,15 @@ describe('测试与构建', () => {
 })
 
 describe('文件与任务', () => {
-  test('成功的编辑记下文件，失败的不记', () => {
-    const edit = (isError: boolean): ToolOutcome => ({ tool: 'Edit', input: { file_path: 'src/a.ts' }, isError, text: '' })
+  test('成功的编辑记下文件并发出改文件信号，失败的不记', () => {
+    const edit = (isError: boolean, tool = 'Edit'): ToolOutcome => ({ tool, input: { file_path: 'src/a.ts' }, isError, text: '' })
     expect(recognize(edit(false), EMPTY_LEDGER).ledger.facts.filesChanged).toEqual(['src/a.ts'])
+    expect(recognize(edit(false, 'Write'), EMPTY_LEDGER).signals).toContainEqual({ kind: 'file-changed' })
     expect(recognize(edit(true), EMPTY_LEDGER).ledger.facts.filesChanged).toEqual([])
+    expect(recognize(edit(true), EMPTY_LEDGER).signals).not.toContainEqual({ kind: 'file-changed' })
+    expect(recognize({ tool: 'Read', input: { file_path: 'src/a.ts' }, isError: false, text: '' }, EMPTY_LEDGER).signals).not.toContainEqual({
+      kind: 'file-changed',
+    })
   })
 
   test('每次工具调用都带一个成功或失败信号', () => {
