@@ -1,0 +1,20 @@
+{
+  "name": "smartcompact",
+  "interface": {
+    "displayName": "SmartCompact"
+  },
+  "plugins": [
+    {
+      "name": "smartcompact",
+      "source": {
+        "source": "local",
+        "path": "./"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

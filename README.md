@@ -54,12 +54,11 @@ With Pi's default settings, SmartCompact compacts at a finished piece of work wh
 **Codex CLI** (0.162 or later, Node.js 22.18 or later)
 
 ```bash
-git clone https://github.com/coffeecoproject/SmartCompact.git
-cd SmartCompact
-node scripts/codex.ts install
+codex plugin marketplace add coffeecoproject/SmartCompact
+codex plugin add smartcompact@smartcompact
 ```
 
-The script only appends one marked block of hooks to `~/.codex/config.toml` (or `$CODEX_HOME/config.toml`), backing up the file first. Trust the 4 hooks when Codex asks on its next start. Run install again after upgrading Node or moving the repository.
+Trust the plugin's 4 hooks when Codex asks on its next start. The hooks find a Node.js 22.18+ on their own (`PATH`, nvm, Homebrew; or set `SMARTCOMPACT_NODE`); without one they do nothing. To update, run `codex plugin marketplace upgrade smartcompact` and then the `codex plugin add` command again. If you installed an earlier version with `node scripts/codex.ts install`, run `node scripts/codex.ts uninstall` in that clone once, so the hooks do not run twice.
 
 Codex hooks cannot postpone a compaction in the middle of a turn, so SmartCompact decides when a turn ends and, if it should compact, starts the compaction through Codex's shared background server once the session is idle (the interactive UI uses it by default). `codex exec` does not use the shared server by default, and the Codex App (ChatGPT.app) currently cannot; there SmartCompact only hands back the progress ledger, and compaction follows Codex's native rules. For a fallback there, add Codex's own `model_post_turn_compact_threshold_percent` at the top of `config.toml`: it compacts after a turn ends once the context passes that percentage of the usable window (31 is about 260k for an 872k window; see the test report).
 
@@ -78,7 +77,7 @@ Codex hooks cannot postpone a compaction in the middle of a turn, so SmartCompac
 ## Seeing what it did
 
 - Claude Code and Pi: `/smartcompact` (or `/smartcompact report`) shows the three lines, the finished-work signals it saw and a cost estimate; `/smartcompact pause` and `resume` turn it off and on for the session. The model can also call a `checkpoint` tool to record decisions, which come back with the ledger after compaction.
-- Codex: `node adapters/codex/report.ts <session ID>`; records are kept in `~/.codex/smartcompact/`.
+- Codex: `node ~/.codex/plugins/cache/smartcompact/smartcompact/<version>/adapters/codex/report.ts <session ID>` (Node.js 22.18+); records are kept in `~/.codex/smartcompact/`.
 
 ## FAQ
 
@@ -92,7 +91,7 @@ Codex hooks cannot postpone a compaction in the middle of a turn, so SmartCompac
 
 - Claude Code: `/plugin uninstall smartcompact@smartcompact`.
 - Pi: `pi remove npm:smartcompact`.
-- Codex: `node scripts/codex.ts uninstall` in the repository.
+- Codex: `codex plugin remove smartcompact@smartcompact`.
 
 ## Development
 

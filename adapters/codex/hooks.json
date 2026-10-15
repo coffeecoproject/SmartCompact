@@ -1,0 +1,8 @@
+{
+  "hooks": {
+    "Stop": [{ "hooks": [{ "type": "command", "command": "sh \"${PLUGIN_ROOT}/adapters/codex/hook.sh\" Stop", "timeout": 30 }] }],
+    "PostCompact": [{ "hooks": [{ "type": "command", "command": "sh \"${PLUGIN_ROOT}/adapters/codex/hook.sh\" PostCompact", "timeout": 30 }] }],
+    "SessionStart": [{ "matcher": "compact", "hooks": [{ "type": "command", "command": "sh \"${PLUGIN_ROOT}/adapters/codex/hook.sh\" SessionStart", "timeout": 30 }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "sh \"${PLUGIN_ROOT}/adapters/codex/hook.sh\" UserPromptSubmit", "timeout": 30 }] }]
+  }
+}

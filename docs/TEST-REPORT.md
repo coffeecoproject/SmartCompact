@@ -9,7 +9,7 @@
 | Claude Code 终端 | 通过 | 交互界面与非交互模式都实测过 |
 | Claude 桌面 App | 等价环境通过，待真机确认 | 用与桌面 App 相同的无界面流式模式实测；真机还没装。对照评测（Haiku）：30 个任务成本 −7%、波动较大；60 个任务（原生组到 82～96 万）成本 −44%，验收无损失，记忆题 180 道少答对 6 道 |
 | pi | 通过 | RPC 模式实测；默认配置下只做一轮结束时的压缩，需要调大 reserveTokens 才有一轮中间的否决。对照评测：成本 −11%～−22%，验收无损失 |
-| Codex 命令行 | 通过（隔离评测环境） | 一轮结束时挑阶段节点、经共享后台服务主动压缩，压缩后补回笔记；不能在一轮中间推迟压缩。对照评测：成本 −19%，验收与记忆题无损失 |
+| Codex 命令行 | 通过（隔离评测环境） | 以 Codex 插件安装（0.1.2 起）；一轮结束时挑阶段节点、经共享后台服务主动压缩，压缩后补回笔记；不能在一轮中间推迟压缩。对照评测：成本 −19%，验收与记忆题无损失 |
 | Codex App（ChatGPT.app） | 实测：走不了共享后台服务 | 未公开的环境变量开关在 26.930 里实际不生效，方案 C 用不上；hook 照常运行，只补回进度笔记 |
 
 ## 压缩的判断规则
@@ -156,6 +156,23 @@ Codex 交互界面默认连到本机共享的后台服务（app-server 守护进
 **测试中发现并修复**：
 - 后台压缩进程用了 Node 只去类型模式不支持的构造函数参数属性写法，一启动就退出、没有日志。已改写，并在 `scripts/check.sh` 里加上 Codex 模块加载检查。
 - 决定压缩后若用户马上开始下一轮，压缩会推迟到之后的空闲时刻，期间情况可能变化。已改为发起前再确认。
+
+### 以 Codex 插件安装（0.1.2 起）
+
+**改动**：Codex 改为插件分发，用户运行 `codex plugin marketplace add coffeecoproject/SmartCompact` 和 `codex plugin add smartcompact@smartcompact`，不再由脚本改 `config.toml`。仓库根目录是插件目录（`.agents/plugins/marketplace.json` 指向 `./`，`.codex-plugin/plugin.json` 声明 `hooks: ./adapters/codex/hooks.json`），因为适配层要用到 `plugin/src/core`。四个 hook 都通过 `adapters/codex/hook.sh` 启动：插件会被复制到 Codex 的缓存目录，没法写死 Node 路径，脚本依次试 `SMARTCOMPACT_NODE`、PATH、nvm（从新到旧）、Homebrew，找第一个 22.18 及以上的 Node，找不到就静默退出。
+
+**实测（Codex CLI 0.162.1，隔离的 CODEX_HOME，不碰用户的 `~/.codex`）**：
+
+| 场景 | 结果 |
+|---|---|
+| 从本地仓库添加插件市场并安装插件 | 通过；`./` 作为插件目录被接受，插件复制到 `plugins/cache/smartcompact/smartcompact/0.1.2` |
+| `codex exec` 跑一轮（`--dangerously-bypass-hook-trust`） | 通过；日志显示 `hook: UserPromptSubmit Completed`、`hook: Stop Completed`，插件在 `CODEX_HOME/smartcompact/sessions` 下记下会话状态 |
+| PATH 里只有系统目录、或排在前面的是 Node 18 时，入口脚本选哪个 Node | 都选到 nvm 里的 22.22.3 |
+| `node scripts/codex.ts uninstall` 删除旧版写进 `config.toml` 的 hook 段 | 通过；只删标记段，其他配置原样保留，并备份原文件 |
+
+**已知代价**：插件目录是整个仓库，Codex 复制时会带上 `docs/media` 里的介绍视频等，缓存一个版本约 20MB（插件代码本身不到 1MB）。Codex 按版本号缓存插件，`scripts/check.sh` 会检查插件版本和 `package.json` 一致。
+
+**还没实测**：插件方式下"一轮结束后经共享后台服务发起压缩"这一步；它的代码和旧安装方式完全相同，只是启动路径变了。
 
 ## Codex 对照评测（18 个连续任务，每组 3 次）
 

@@ -54,12 +54,11 @@ Pi 默认配置下，插件在一轮结束（`agent_settled`）时挑刚做完�
 **Codex 命令行**（0.162 及以上，Node.js 22.18 及以上）
 
 ```bash
-git clone https://github.com/coffeecoproject/SmartCompact.git
-cd SmartCompact
-node scripts/codex.ts install
+codex plugin marketplace add coffeecoproject/SmartCompact
+codex plugin add smartcompact@smartcompact
 ```
 
-安装脚本只在 `~/.codex/config.toml`（或 `$CODEX_HOME/config.toml`）末尾写入一段带标记的 hook 配置，改之前备份原文件。下次启动 Codex 时按提示信任这 4 个 hook。升级 Node 或移动仓库后重新运行一次 install。
+下次启动 Codex 时按提示信任插件的 4 个 hook。hook 会自己找 22.18 及以上的 Node.js（PATH、nvm、Homebrew，也可以用 `SMARTCOMPACT_NODE` 指定），找不到就什么都不做。更新时运行 `codex plugin marketplace upgrade smartcompact`，再执行一次上面的 `codex plugin add`。以前用 `node scripts/codex.ts install` 装过的，先在那份仓库里运行一次 `node scripts/codex.ts uninstall`，避免 hook 运行两遍。
 
 Codex 的 hook 不能推迟一轮中间的压缩，所以插件在一轮结束时判断，需要压缩就通过 Codex 的共享后台服务（交互界面默认会用它）在会话空闲时发起。`codex exec` 默认不走共享后台服务，Codex App（ChatGPT.app）目前走不了，这时插件只补回进度笔记，压缩仍按 Codex 原生规则。想给它们也加个兜底，可以在 `config.toml` 顶部加上 Codex 自带的 `model_post_turn_compact_threshold_percent`：上下文超过可用窗口的这个百分比时，在一轮结束后压缩（窗口 87.2 万时设 31，约 26 万；详见测试报告）。
 
@@ -78,7 +77,7 @@ Codex 的 hook 不能推迟一轮中间的压缩，所以插件在一轮结束�
 ## 查看效果
 
 - Claude Code 和 Pi：`/smartcompact`（或 `/smartcompact report`）查看三条线、识别到的阶段节点和成本估算；`/smartcompact pause` / `resume` 暂停或恢复当前会话。模型还可以调用 `checkpoint` 工具记下决定，压缩后和进度笔记一起补回。
-- Codex：`node adapters/codex/report.ts <会话 ID>`，记录在 `~/.codex/smartcompact/`。
+- Codex：`node ~/.codex/plugins/cache/smartcompact/smartcompact/<版本>/adapters/codex/report.ts <会话 ID>`（Node.js 22.18 及以上），记录在 `~/.codex/smartcompact/`。
 
 ## 常见问题
 
@@ -92,7 +91,7 @@ Codex 的 hook 不能推迟一轮中间的压缩，所以插件在一轮结束�
 
 - Claude Code：`/plugin uninstall smartcompact@smartcompact`。
 - Pi：`pi remove npm:smartcompact`。
-- Codex：在仓库目录里运行 `node scripts/codex.ts uninstall`。
+- Codex：`codex plugin remove smartcompact@smartcompact`。
 
 ## 开发
 

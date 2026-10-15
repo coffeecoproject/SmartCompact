@@ -1,0 +1,22 @@
+{
+  "name": "smartcompact",
+  "version": "0.1.2",
+  "description": "Compacts long Codex sessions earlier, at a pause after a piece of work is finished, and hands a progress ledger back after compaction. Runs locally; no network requests.",
+  "author": {
+    "name": "coffeecoproject",
+    "url": "https://github.com/coffeecoproject/SmartCompact"
+  },
+  "homepage": "https://github.com/coffeecoproject/SmartCompact",
+  "repository": "https://github.com/coffeecoproject/SmartCompact",
+  "license": "MIT",
+  "keywords": ["compaction", "context", "cost", "hooks"],
+  "hooks": "./adapters/codex/hooks.json",
+  "interface": {
+    "displayName": "SmartCompact",
+    "shortDescription": "Compact early, at a finished piece of work",
+    "developerName": "coffeecoproject",
+    "category": "Developer Tools",
+    "websiteURL": "https://github.com/coffeecoproject/SmartCompact",
+    "supportURL": "https://github.com/coffeecoproject/SmartCompact/issues"
+  }
+}

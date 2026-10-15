@@ -18,5 +18,15 @@ for module in adapters/codex/*.ts; do
 done
 echo "Codex 适配模块加载：通过"
 
+# Codex 插件：清单和 hook 配置是合法 JSON，入口脚本语法正确；Codex 按版本号缓存插件，版本要和 package.json 一致，否则用户拿不到更新。
+node -e "
+const fs = require('fs')
+for (const f of ['.agents/plugins/marketplace.json', '.codex-plugin/plugin.json', 'adapters/codex/hooks.json']) JSON.parse(fs.readFileSync(f, 'utf8'))
+const [pkg, codex] = ['package.json', '.codex-plugin/plugin.json'].map(f => JSON.parse(fs.readFileSync(f, 'utf8')).version)
+if (pkg !== codex) { console.error('版本不一致：package.json ' + pkg + '，.codex-plugin/plugin.json ' + codex); process.exit(1) }
+"
+sh -n adapters/codex/hook.sh
+echo "Codex 插件清单：通过"
+
 claude plugin validate ./plugin
 claude plugin test ./plugin
