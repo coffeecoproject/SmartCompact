@@ -14,7 +14,7 @@ export type PiToolOutcome = {
 
 const EDIT_TOOLS = new Set(['edit', 'write'])
 
-export function recognizePi(outcome: PiToolOutcome, ledger: Ledger): { signals: Signal[]; ledger: Ledger } {
+export function recognizePi(outcome: PiToolOutcome, ledger: Ledger): { signals: Signal[]; ledger: Ledger; read?: string } {
   const signals: Signal[] = [{ kind: 'tool-result', isError: outcome.isError }]
   let next = ledger
   const { path, command } = outcome.input
@@ -26,5 +26,6 @@ export function recognizePi(outcome: PiToolOutcome, ledger: Ledger): { signals: 
     signals.push(...classified.signals)
     next = classified.ledger
   }
-  return { signals, ledger: next }
+  const read = outcome.toolName === 'read' && !outcome.isError && typeof path === 'string' && path ? path : undefined
+  return { signals, ledger: next, read }
 }

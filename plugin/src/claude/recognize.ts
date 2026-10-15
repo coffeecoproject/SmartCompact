@@ -12,7 +12,7 @@ export type ToolOutcome = {
   text: string
 }
 
-export type Recognized = { signals: Signal[]; ledger: Ledger }
+export type Recognized = { signals: Signal[]; ledger: Ledger; /** 读了哪个文件 */ read?: string }
 
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit'])
 
@@ -34,6 +34,8 @@ export function recognize(outcome: ToolOutcome, ledger: Ledger): Recognized {
     next = recordTasksInProgress(next, inProgress)
   }
 
+  const read = outcome.tool === 'Read' && !outcome.isError ? text(outcome.input.file_path) : undefined
+
   const command = outcome.tool === 'Bash' ? text(outcome.input.command) : undefined
   if (command) {
     const classified = classifyCommand(command, outcome.isError, outcome.text, next)
@@ -41,7 +43,7 @@ export function recognize(outcome: ToolOutcome, ledger: Ledger): Recognized {
     next = classified.ledger
   }
 
-  return { signals, ledger: next }
+  return { signals, ledger: next, read }
 }
 
 /** 任务开始和完成（经典 TaskCreated / TaskCompleted 事件）对进行中任务列表的影响。 */

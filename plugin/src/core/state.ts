@@ -20,7 +20,23 @@ export type SessionState = {
   /** 各种信号出现过的次数，用于确认识别是否生效 */
   seen: SignalsSeen
   usage: UsageTally
+  /** 读文件的统计；平台认不出读文件时没有这一项 */
+  reads?: ReadStats
 }
+
+/** 用来看压缩后要花多少次读取重新熟悉代码。 */
+export type ReadStats = {
+  /** 上次压缩之前读过或改过的文件 */
+  known: string[]
+  /** 上次压缩以来读过的文件 */
+  current: string[]
+  /** 上次压缩以来读文件的次数 */
+  reads: number
+  /** 其中读的是压缩前已经看过的文件 */
+  rereads: number
+}
+
+const MAX_KNOWN_FILES = 300
 
 export const INITIAL_SESSION_STATE: SessionState = Object.freeze({
   work: INITIAL_WORK_STATE,
@@ -73,14 +89,40 @@ export function withSample(state: SessionState, tokens: number, ceiling: number,
  * @param attributed 是否算作插件带来的压缩；用户手动 /compact 没有插件时也会发生，不计入节省
  */
 export function withCompaction(state: SessionState, before: number, summary: number, attributed = true): SessionState {
+  const reads = state.reads && {
+    known: [...new Set([...state.reads.known, ...state.reads.current, ...state.ledger.facts.filesChanged])].slice(-MAX_KNOWN_FILES),
+    current: [],
+    reads: 0,
+    rereads: 0,
+  }
   return {
     ...state,
+    ...(reads && { reads }),
     work: afterCompaction(state.work),
     compactions: state.compactions + 1,
     notesUpdated: false,
     nudged: false,
     usage: attributed ? recordCompaction(state.usage, before, summary) : state.usage,
   }
+}
+
+/** 记一次读文件：读的是上次压缩前看过的文件就算重读。 */
+export function withRead(state: SessionState, path: string): SessionState {
+  const stats = state.reads ?? { known: [], current: [], reads: 0, rereads: 0 }
+  return {
+    ...state,
+    reads: {
+      known: stats.known,
+      current: [...stats.current.filter(file => file !== path), path].slice(-MAX_KNOWN_FILES),
+      reads: stats.reads + 1,
+      rereads: stats.rereads + (stats.known.includes(path) ? 1 : 0),
+    },
+  }
+}
+
+/** 压缩时记进日志的本周期读文件次数；平台认不出读文件时为空。 */
+export function cycleReads(state: SessionState): Pick<DecisionLogEntry, 'reads' | 'rereads'> {
+  return state.reads ? { reads: state.reads.reads, rereads: state.reads.rereads } : {}
 }
 
 export type DecisionLogEntry = {
@@ -95,6 +137,9 @@ export type DecisionLogEntry = {
   tokensAfter?: number
   /** 决定压缩时，距离最近的阶段节点上下文涨了多少 */
   sinceMilestoneTokens?: number
+  /** 压缩时：上次压缩以来读文件的次数，以及其中重读压缩前看过的文件的次数 */
+  reads?: number
+  rereads?: number
   trigger?: string
   detail?: string
 }

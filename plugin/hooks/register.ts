@@ -10,16 +10,19 @@ import { type Params, resolveParams } from '../src/core/params.ts'
 import { countDecisions, renderReport } from '../src/core/report.ts'
 import { pricesFor } from '../src/core/usage.ts'
 import {
+  cycleReads,
   type DecisionLogEntry,
   expectedAfterTokens,
   growthSinceMilestone,
   parseState,
   type SessionState,
   withCompaction,
+  withRead,
   withSample,
   withSignals,
 } from '../src/core/state.ts'
 import type { NativeSetup } from '../src/claude/native.ts'
+import { queuedCompaction } from '../src/claude/queued.ts'
 import { recognize, taskCompleted, taskCreated } from '../src/claude/recognize.ts'
 import { parseRecord, RECORD_PREFIX, type SessionRecord, staleRecordKeys } from '../src/claude/record.ts'
 
@@ -43,9 +46,7 @@ let pendingCompaction: object | null = null
 /** 插件自己发起的压缩不经过本插件的 session.compact hook，笔记在下一条消息时补回。 */
 let ledgerToAttach: string | null = null
 /** 无界面会话里改为排队执行 /compact，等空闲才运行；期间压缩过或用户发了新消息就作废。 */
-let queuedCompaction = false
-/** 排队的 /compact 正在运行：它的压缩以 manual 触发经过本插件的 hook，据此认出是插件发起的。 */
-let runningQueued = false
+let queuedPending = false
 
 async function loadRecord($: EngineInterface): Promise<SessionRecord> {
   return parseRecord(await $.store.get(`${RECORD_PREFIX}${await $.session.id()}`))
@@ -98,20 +99,21 @@ async function compactNow($: EngineInterface, ticket: object): Promise<void> {
       await log($, { event: 'compacted', action: 'skipped', trigger: 'plugin', detail: done.skip })
       return
     }
-    const state = withCompaction(await loadSession($), done.tokensBefore ?? 0, done.tokensAfter ?? 0)
+    const before = await loadSession($)
+    const state = withCompaction(before, done.tokensBefore ?? 0, done.tokensAfter ?? 0)
     await saveSession($, state)
     ledgerToAttach = renderLedger(state.ledger, params.ledgerMaxChars)
-    await log($, { event: 'compacted', trigger: 'plugin', tokensBefore: done.tokensBefore, tokensAfter: done.tokensAfter })
+    await log($, { event: 'compacted', trigger: 'plugin', tokensBefore: done.tokensBefore, tokensAfter: done.tokensAfter, ...cycleReads(before) })
   } catch (error) {
     // 无界面会话（桌面 App、SDK、-p）暂不支持直接压缩，改为排队执行 /compact，等会话空闲时运行。
     if (String(error).includes('headless')) {
       try {
-        queuedCompaction = true
+        queuedPending = true
         await $.command.run({ command: 'compact', args: COMPACT_INSTRUCTIONS })
         await log($, { event: 'compacted', action: 'queued', trigger: 'plugin' })
         return
       } catch (queueError) {
-        queuedCompaction = false
+        queuedPending = false
         error = queueError
       }
     }
@@ -188,8 +190,9 @@ export const register: Register = (on, options) => {
       const lines = await loadLines($)
       const { state } = await sample($, await loadSession($), lines)
       const outcome = { tool: e.tool, input: e as unknown as Record<string, unknown>, isError: ran.isError === true, text: ran.text ?? '' }
-      const { signals, ledger } = recognize(outcome, state.ledger)
-      await saveSession($, withSignals({ ...state, ledger }, signals))
+      const { signals, ledger, read } = recognize(outcome, state.ledger)
+      const updated = withSignals({ ...state, ledger }, signals)
+      await saveSession($, read ? withRead(updated, read) : updated)
     } catch {
       // 识别失败只影响判断，不影响工具调用本身
     }
@@ -210,7 +213,7 @@ export const register: Register = (on, options) => {
 
   on('prompt.submit', async ($, e, next) => {
     pendingCompaction = null
-    queuedCompaction = false
+    queuedPending = false
     const context = [...(e.context ?? [])]
     if (ledgerToAttach) {
       context.push(ledgerToAttach)
@@ -253,34 +256,24 @@ export const register: Register = (on, options) => {
     return result
   })
 
-  // 排队的 /compact 轮到时已经作废就不再压缩，以压缩说明认出是插件排的。
-  on('command.run', { command: 'compact' }, async ($, e, next) => {
-    if (e.args !== COMPACT_INSTRUCTIONS) return next(e)
-    if (!queuedCompaction) {
-      await log($, { event: 'compacted', action: 'skipped', trigger: 'plugin', detail: 'stale' })
-      return { text: 'SmartCompact: skipped a queued compaction that is no longer needed.' }
-    }
-    queuedCompaction = false
-    runningQueued = true
-    try {
-      return await next(e)
-    } finally {
-      runningQueued = false
-    }
-  }).catch(($, e, next) => next(e))
-
   on('session.compact', async ($, e, next) => {
     // 子 agent 自己的压缩和提前计算的摘要不干预；原生自动压缩只在快满时发生，一律放行，压缩后补回笔记。
     if (e.agentId || e.trigger === 'precompute') return next(e)
+    const queued = queuedCompaction(e, queuedPending)
+    const ours = queued === 'ours'
+    if (queued === 'stale') {
+      await log($, { event: 'compacted', action: 'skipped', trigger: 'plugin', detail: 'stale' })
+      return { skip: 'SmartCompact: skipped a queued compaction that is no longer needed.' }
+    }
+    queuedPending = false
     let state = await loadSession($)
-    const ours = e.trigger === 'manual' && runningQueued
-    if (!ours) queuedCompaction = false
     const result = await next(e)
     if (result.skip !== undefined) return result
+    const reads = cycleReads(state)
     state = withCompaction(state, result.tokensBefore ?? 0, result.tokensAfter ?? 0, e.trigger !== 'manual' || ours)
     await saveSession($, state)
     const trigger = ours ? 'plugin-queued' : e.trigger
-    await log($, { event: 'compacted', trigger, tokensBefore: result.tokensBefore, tokensAfter: result.tokensAfter })
+    await log($, { event: 'compacted', trigger, tokensBefore: result.tokensBefore, tokensAfter: result.tokensAfter, ...reads })
     // 只保留最新的一份笔记。
     const ledger = { role: 'user' as const, text: renderLedger(state.ledger, params.ledgerMaxChars), toolUses: [] }
     return { ...result, messages: [...result.messages.filter(message => !isLedgerText(message.text)), ledger] }

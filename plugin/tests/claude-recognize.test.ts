@@ -88,3 +88,11 @@ describe('会话记录', () => {
     expect(staleRecordKeys(records, 5)).toEqual([])
   })
 })
+
+describe('读文件', () => {
+  test('Read 成功时记下路径，失败不记', () => {
+    expect(recognize({ tool: 'Read', input: { file_path: 'src/a.ts' }, isError: false, text: '' }, EMPTY_LEDGER).read).toBe('src/a.ts')
+    expect(recognize({ tool: 'Read', input: { file_path: 'src/a.ts' }, isError: true, text: '' }, EMPTY_LEDGER).read).toBeUndefined()
+    expect(recognize(bash('cat src/a.ts'), EMPTY_LEDGER).read).toBeUndefined()
+  })
+})

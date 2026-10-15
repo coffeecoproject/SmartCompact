@@ -12,6 +12,7 @@ import type { Lines } from '../../plugin/src/core/lines.ts'
 import { resolveParams } from '../../plugin/src/core/params.ts'
 import { countDecisions, renderReport } from '../../plugin/src/core/report.ts'
 import {
+  cycleReads,
   type DecisionLogEntry,
   expectedAfterTokens,
   growthSinceMilestone,
@@ -19,6 +20,7 @@ import {
   parseState,
   type SessionState,
   withCompaction,
+  withRead,
   withSample,
   withSignals,
 } from '../../plugin/src/core/state.ts'
@@ -163,8 +165,9 @@ export default function smartCompact(pi: ExtensionAPI) {
     if (event.toolName === CHECKPOINT_TOOL) return
     sample(ctx, lines(ctx))
     const text = event.content.flatMap(block => (block.type === 'text' ? [block.text] : [])).join('\n')
-    const { signals, ledger } = recognizePi({ toolName: event.toolName, input: event.input, isError: event.isError, text }, state.ledger)
+    const { signals, ledger, read } = recognizePi({ toolName: event.toolName, input: event.input, isError: event.isError, text }, state.ledger)
     state = withSignals({ ...state, ledger }, signals)
+    if (read) state = withRead(state, read)
   })
 
   pi.on('before_agent_start', async (_event, ctx) => {
@@ -216,10 +219,11 @@ export default function smartCompact(pi: ExtensionAPI) {
     const fromPlugin = event.reason === 'manual' && ours
     ours = false
     const summaryTokens = Math.round(event.compactionEntry.summary.length / 4)
+    const reads = cycleReads(state)
     // 原生按阈值的压缩、溢出恢复和用户的 /compact，没有插件时也会发生；只有插件发起的压缩计入节省。
     state = withCompaction(state, event.compactionEntry.tokensBefore, summaryTokens, fromPlugin)
     persist()
-    log({ event: 'compacted', trigger: fromPlugin ? 'plugin' : event.reason === 'threshold' ? 'auto' : event.reason, tokensBefore: event.compactionEntry.tokensBefore })
+    log({ event: 'compacted', trigger: fromPlugin ? 'plugin' : event.reason === 'threshold' ? 'auto' : event.reason, tokensBefore: event.compactionEntry.tokensBefore, ...reads })
     pi.sendMessage(
       { customType: LEDGER_MESSAGE, content: renderLedger(state.ledger, params(ctx).ledgerMaxChars), display: false },
       { deliverAs: ctx.isIdle() ? 'nextTurn' : 'steer' },

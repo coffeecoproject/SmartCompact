@@ -10,7 +10,7 @@ import {
   recordTest,
   renderLedger,
 } from '../src/core/ledger.ts'
-import { expectedAfterTokens, INITIAL_SESSION_STATE, parseState } from '../src/core/state.ts'
+import { cycleReads, expectedAfterTokens, INITIAL_SESSION_STATE, parseState, withCompaction, withRead } from '../src/core/state.ts'
 
 describe('checkpoint 输入校验', () => {
   test('接受合法输入', () => {
@@ -54,6 +54,29 @@ describe('进度笔记', () => {
     expect(isLedgerText('hello')).toBe(false)
   })
 
+  test('超长时先丢最旧的决定，结果和提交留着', () => {
+    let ledger = applyCheckpoint(EMPTY_LEDGER, { decisions: Array.from({ length: 20 }, (_, i) => `d${i}-${'x'.repeat(300)}`) })
+    ledger = recordTest(recordCommit(recordFileChanged(ledger, 'src/login.ts'), 'feat: login'), 'npm test', true)
+    const text = renderLedger(ledger, 2_000)
+    expect(text.length).toBeLessThanOrEqual(2_000)
+    expect(text).toContain('tests passed: npm test')
+    expect(text).toContain('last commit: feat: login')
+    expect(text).toContain('src/login.ts')
+    expect(text).toContain('d19-')
+    expect(text).not.toContain('d0-')
+    expect(text).toMatch(/earlier decisions omitted/)
+    expect(text).not.toContain('…(truncated)')
+  })
+
+  test('决定丢完仍超长时丢最早改过的文件', () => {
+    const ledger = Array.from({ length: 30 }, (_, i) => `src/module-${i}/${'f'.repeat(60)}.ts`).reduce(recordFileChanged, EMPTY_LEDGER)
+    const text = renderLedger(ledger, 1_000)
+    expect(text.length).toBeLessThanOrEqual(1_000)
+    expect(text).toContain('module-29/')
+    expect(text).not.toContain('module-0/')
+    expect(text).toMatch(/earlier files omitted/)
+  })
+
   test('超长时截断', () => {
     const ledger = applyCheckpoint(EMPTY_LEDGER, { goal: 'x'.repeat(900), current: 'y'.repeat(900) })
     const text = renderLedger(ledger, 500)
@@ -72,5 +95,24 @@ describe('会话状态', () => {
   test('没有实测值时用默认的压缩后大小', () => {
     expect(expectedAfterTokens(INITIAL_SESSION_STATE, 50_000)).toBe(50_000)
     expect(expectedAfterTokens({ ...INITIAL_SESSION_STATE, measuredAfterTokens: 42_000 }, 50_000)).toBe(42_000)
+  })
+})
+
+describe('压缩后重读', () => {
+  test('压缩前读过或改过的文件，压缩后再读算重读', () => {
+    let state = withRead(INITIAL_SESSION_STATE, 'a.ts')
+    state = withRead(state, 'a.ts')
+    state = { ...state, ledger: recordFileChanged(state.ledger, 'b.ts') }
+    expect(cycleReads(state)).toEqual({ reads: 2, rereads: 0 })
+    state = withCompaction(state, 200_000, 5_000)
+    expect(cycleReads(state)).toEqual({ reads: 0, rereads: 0 })
+    for (const file of ['a.ts', 'b.ts', 'c.ts']) state = withRead(state, file)
+    expect(cycleReads(state)).toEqual({ reads: 3, rereads: 2 })
+  })
+
+  test('平台认不出读文件时不记', () => {
+    const state = withCompaction(INITIAL_SESSION_STATE, 200_000, 5_000)
+    expect(state.reads).toBeUndefined()
+    expect(cycleReads(state)).toEqual({})
   })
 })
