@@ -6,6 +6,9 @@
 [![GitHub stars](https://img.shields.io/github/stars/coffeecoproject/SmartCompact?style=social)](https://github.com/coffeecoproject/SmartCompact/stargazers)
 [![License](https://img.shields.io/badge/license-MIT-blue)](https://github.com/coffeecoproject/SmartCompact/blob/main/LICENSE)
 
+<p align="center"><a href="https://github.com/coffeecoproject/SmartCompact/raw/main/docs/media/smartcompact-zh.mp4"><img src="https://raw.githubusercontent.com/coffeecoproject/SmartCompact/main/docs/media/cover-zh.jpg" alt="90 秒看懂 SmartCompact（视频）" width="100%"></a></p>
+<p align="center"><sub>▶ 90 秒动画介绍（点击图片播放）</sub></p>
+
 **SmartCompact 让编程 agent 的长会话早点压缩，挑在做完一件事之后的停顿处。** 在 18～60 个连续开发任务上，成本降低 **7%～44%**，隐藏验收测试没有损失，会话越长省得越多。最长的一组（60 个任务，原生组上下文到 82 万～96 万）里，很早之前随口提到的细节，180 道记忆题少答对 6 道（[测试报告](https://github.com/coffeecoproject/SmartCompact/blob/main/docs/TEST-REPORT.md)）。
 
 agent 每发一次请求，都要把整段上下文重新读一遍，上下文越长，每一步越贵。原生的自动压缩要等到快满了才触发（Claude Code 接近 100 万，Codex 可以配到 80 万），而且不看时机，常常发生在一件事做到一半的时候。SmartCompact 支持 Claude Code（终端和桌面 App）、[Pi](https://github.com/earendil-works/pi) 和 Codex 命令行：

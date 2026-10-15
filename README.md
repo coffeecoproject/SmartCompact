@@ -6,6 +6,9 @@
 [![GitHub stars](https://img.shields.io/github/stars/coffeecoproject/SmartCompact?style=social)](https://github.com/coffeecoproject/SmartCompact/stargazers)
 [![License](https://img.shields.io/badge/license-MIT-blue)](https://github.com/coffeecoproject/SmartCompact/blob/main/LICENSE)
 
+<p align="center"><a href="https://github.com/coffeecoproject/SmartCompact/raw/main/docs/media/smartcompact-en.mp4"><img src="https://raw.githubusercontent.com/coffeecoproject/SmartCompact/main/docs/media/cover-en.jpg" alt="SmartCompact in 90 seconds (video)" width="100%"></a></p>
+<p align="center"><sub>▶ Watch the 90-second explainer (click the image to play)</sub></p>
+
 **SmartCompact lets long coding-agent sessions compact earlier, at a pause after a piece of work is finished.** On 18–60 consecutive coding tasks it cut cost by **7–44%** with no loss in hidden acceptance tests; the longer the session, the more it saves. In the longest runs (60 tasks, native sessions reaching 820k–960k tokens) the model missed 6 of 180 recall questions about details mentioned in passing much earlier ([test report](https://github.com/coffeecoproject/SmartCompact/blob/main/docs/TEST-REPORT.md), in Chinese).
 
 Every request re-reads the whole context, so a long context makes every step expensive. Native auto-compaction waits until the context is nearly full (close to 1M tokens in Claude Code, up to 800k in Codex if configured), and it ignores timing, so it often lands in the middle of a task. SmartCompact works with Claude Code (CLI and desktop app), [Pi](https://github.com/earendil-works/pi) and the Codex CLI:
