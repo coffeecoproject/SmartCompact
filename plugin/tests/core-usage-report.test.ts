@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'claude-code/testing'
 import { shouldNudge } from '../src/core/decide.ts'
-import { planLines } from '../src/core/lines.ts'
 import { DEFAULT_PARAMS } from '../src/core/params.ts'
 import { countDecisions, renderReport } from '../src/core/report.ts'
 import { INITIAL_SESSION_STATE, withCompaction, withSample, withSignals } from '../src/core/state.ts'
@@ -47,16 +46,14 @@ describe('成本估算', () => {
 })
 
 describe('会话状态', () => {
-  test('信号计数只数阶段节点和后台任务', () => {
+  test('信号计数只数阶段节点', () => {
     const state = withSignals(INITIAL_SESSION_STATE, [
       { kind: 'commit' },
       { kind: 'tests', passed: false },
       { kind: 'tests', passed: true },
       { kind: 'tool-result', isError: false },
-      { kind: 'background', running: 2 },
-      { kind: 'background', running: 0 },
     ])
-    expect(state.seen).toEqual({ commit: 1, 'tests-passed': 1, 'task-completed': 0, checkpoint: 0, background: 1 })
+    expect(state.seen).toEqual({ commit: 1, 'tests-passed': 1, 'task-completed': 0, checkpoint: 0 })
     expect(state.work.milestone).toBe('tests-passed')
   })
 
@@ -79,7 +76,7 @@ describe('会话状态', () => {
 })
 
 describe('提醒更新笔记', () => {
-  const lines = planLines(1_000_000, DEFAULT_PARAMS)
+  const lines = { allow: 200_000, ceiling: 967_000 }
   const base = { lines, notesUpdated: false, nudged: false, paused: false }
   test('快到允许压缩线时提醒一次', () => {
     expect(shouldNudge({ ...base, tokens: 170_000 }, DEFAULT_PARAMS)).toBe(true)
@@ -106,14 +103,14 @@ describe('报告', () => {
     ).toEqual({ 'compacted:plugin': 1, 'compacted:auto': 1, 'mid-turn:veto': 2, 'compacted:failed': 1 })
   })
 
-  test('报告包含三条线、信号次数和成本估算', () => {
+  test('报告包含两条线、信号次数和成本估算', () => {
     const text = renderReport({
       state: { ...INITIAL_SESSION_STATE, compactions: 2 },
-      lines: planLines(1_000_000, DEFAULT_PARAMS),
+      lines: { allow: 200_000, ceiling: 967_000 },
       tokens: 120_000,
       counts: { 'compacted:plugin': 2 },
     })
-    expect(text).toContain('允许压缩线 200k')
+    expect(text).toContain('允许压缩线 200k，原生压缩点 967k')
     expect(text).toContain('插件压缩 2')
     expect(text).toContain('任务完成 0')
     expect(text).toContain('还没有读数')
@@ -122,7 +119,7 @@ describe('报告', () => {
   test('刚压缩完估算为负时说明原因', () => {
     let usage = recordCompaction(recordSample(EMPTY_TALLY, 300_000, CEILING, PRICES), 300_000, 3_000)
     usage = recordSample(usage, 50_000, CEILING, PRICES)
-    const text = renderReport({ state: { ...INITIAL_SESSION_STATE, usage }, lines: planLines(1_000_000, DEFAULT_PARAMS), tokens: 50_000, counts: {} })
+    const text = renderReport({ state: { ...INITIAL_SESSION_STATE, usage }, lines: { allow: 200_000, ceiling: 967_000 }, tokens: 50_000, counts: {} })
     expect(text).toContain('继续使用后会转正')
   })
 })

@@ -1,5 +1,4 @@
 import { describe, expect, test } from 'claude-code/testing'
-import { MIN_NATIVE_SETTING, nativeSettingFor, planLines } from '../src/core/lines.ts'
 import { DEFAULT_PARAMS, resolveParams } from '../src/core/params.ts'
 import { type Signal, afterCompaction, applySignal, hardSignal, INITIAL_WORK_STATE } from '../src/core/signals.ts'
 
@@ -28,6 +27,13 @@ describe('信号', () => {
     expect(applySignal(streak, { kind: 'tool-result', isError: false }).errorStreak).toBe(0)
   })
 
+  test('失败之后又做完一件事，失败不再挡着压缩', () => {
+    const committed = run([{ kind: 'tests', passed: false }, { kind: 'build', passed: false }, { kind: 'commit' }])
+    expect(committed.milestone).toBe('commit')
+    expect(hardSignal(committed, DEFAULT_PARAMS)).toBeNull()
+    expect(hardSignal(run([{ kind: 'tests', passed: false }, { kind: 'checkpoint', milestone: false }]), DEFAULT_PARAMS)).toBe('tests-failing')
+  })
+
   test('压缩后清空阶段节点，仍然成立的失败保留', () => {
     const state = afterCompaction(run([{ kind: 'commit' }, { kind: 'build', passed: false }]))
     expect(state.milestone).toBeNull()
@@ -35,28 +41,10 @@ describe('信号', () => {
   })
 })
 
-describe('三条线', () => {
-  test('1M 窗口：L=200k，M=260k，C=967k，并调整原生压缩线', () => {
-    const lines = planLines(1_000_000, DEFAULT_PARAMS)
-    expect(lines).toEqual({ allow: 200_000, midTurn: 260_000, ceiling: 967_000, adjustsNative: true })
-    expect(nativeSettingFor(lines, DEFAULT_PARAMS)).toBe(293_000)
-  })
-
-  test('200k 窗口放不下兜底线时不调整原生压缩线', () => {
-    expect(planLines(200_000, DEFAULT_PARAMS)).toEqual({ allow: 200_000, midTurn: 167_000, ceiling: 167_000, adjustsNative: false })
-  })
-
-  test('L 很小时，M 与写入的设定值都按原生允许的最小值算', () => {
-    const small = resolveParams({ allowLineTokens: 40_000 })
-    const lines = planLines(1_000_000, small)
-    expect(lines.midTurn).toBe(MIN_NATIVE_SETTING - small.nativeBufferTokens)
-    expect(nativeSettingFor(lines, small)).toBe(MIN_NATIVE_SETTING)
-  })
-
+describe('参数', () => {
   test('不合法的参数覆盖沿用默认值', () => {
-    const params = resolveParams({ allowLineTokens: -1, graceFactor: 0.5, minFreedTokens: 'x', errorStreakLimit: 5 })
+    const params = resolveParams({ allowLineTokens: -1, minFreedTokens: 'x', errorStreakLimit: 5 })
     expect(params.allowLineTokens).toBe(DEFAULT_PARAMS.allowLineTokens)
-    expect(params.graceFactor).toBe(DEFAULT_PARAMS.graceFactor)
     expect(params.minFreedTokens).toBe(DEFAULT_PARAMS.minFreedTokens)
     expect(params.errorStreakLimit).toBe(5)
   })

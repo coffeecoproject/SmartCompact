@@ -3,13 +3,11 @@
 export type Params = {
   /** 允许压缩线 L：一轮结束时超过它才考虑压缩 */
   allowLineTokens: number
-  /** 轮中兜底线 M = L × graceFactor */
-  graceFactor: number
   /** 一次压缩至少要腾出的空间，不够就不压，防止连续压缩 */
   minFreedTokens: number
   /** 还没实测到压缩后大小时，用这个估计值 */
   defaultAfterTokens: number
-  /** 原生触发点 ≈ 压缩线设定值 − 这个值（实测约 33k） */
+  /** Claude 原生触发点 ≈ 窗口 − 这个值（实测约 33k） */
   nativeBufferTokens: number
   /** 用量读数可能落后于最新的工具结果，接近上限时留出的余量 */
   ceilingMarginTokens: number
@@ -23,7 +21,6 @@ export type Params = {
 
 export const DEFAULT_PARAMS: Params = Object.freeze({
   allowLineTokens: 200_000,
-  graceFactor: 1.3,
   minFreedTokens: 60_000,
   defaultAfterTokens: 50_000,
   nativeBufferTokens: 33_000,
@@ -35,7 +32,6 @@ export const DEFAULT_PARAMS: Params = Object.freeze({
 
 const MINIMUMS: Record<keyof Params, number> = {
   allowLineTokens: 1,
-  graceFactor: 1,
   minFreedTokens: 0,
   defaultAfterTokens: 0,
   nativeBufferTokens: 0,

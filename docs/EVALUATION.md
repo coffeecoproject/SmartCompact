@@ -11,7 +11,7 @@ How SmartCompact was tested and what it changed. This is the English summary of 
 | Claude Code (Haiku 5.5) | 30 | close to 1M | -7% (noisy) | 30/30 both | 90/90 both |
 | Claude Code (Haiku 5.5) | 60 | close to 1M | **-44%** | native 179/180, SmartCompact 180/180 | native 180/180, SmartCompact 174/180 |
 
-Each cell compares 3 runs without SmartCompact against 3 runs with it (default settings: allow line 200k, grace factor 1.3, minimum freed 60k). The longer the session grows past 200k, the more it saves; below 200k SmartCompact does nothing.
+Each cell compares 3 runs without SmartCompact against 3 runs with it (default settings of the version tested: allow line 200k, grace factor 1.3, minimum freed 60k; see [Changes since](#changes-since-the-evaluation) for 0.1.3). The longer the session grows past 200k, the more it saves; below 200k SmartCompact does nothing.
 
 ## Method
 
@@ -92,6 +92,15 @@ Per-run cost ranges did not overlap (39.9M-49.4M vs 32.5M-38.5M). In rounds 2-3 
 
 Both arms lost incidental details after compaction, because Pi's compaction summary drops them. The fix asked the compaction summary to keep every specific fact the user stated, verbatim; it reduced the losses but did not remove them. The runs after the fix ran alone rather than alongside five others, so part of the difference comes from run conditions; hence the -11% to -22% range.
 
+## Changes since the evaluation
+
+Real use in the Claude Code desktop app (13 sessions over about 17 hours, version 0.1.0) showed two problems, and 0.1.3 changed the rules:
+
+- **Background tasks blocked compaction.** A running background task (a monitor, a background command) counted as unfinished work, so SmartCompact neither compacted nor let native compaction through until the context was near full. In the desktop app such tasks often run for hours; four sessions grew to 430k-920k. Background tasks no longer count.
+- **A fixed fallback cut long tasks short.** Versions up to 0.1.2 moved Claude's native compaction to about 260k and also compacted there without a finished piece of work. When a turn crossed 260k, native compaction fired in the middle of it (3 times). A long stretch without a finished piece of work usually means one large task, which is when a large context helps. 0.1.3 removed the fallback and no longer touches the native compaction point: SmartCompact compacts only after finished work past 200k, and otherwise the platform's native compaction applies as without the plugin.
+
+The A/B results above still apply: in the Claude and Codex runs every SmartCompact compaction followed a finished piece of work (at 202k-218k on Claude), so the fallback never fired. On Pi the fallback was Pi's own native compaction point, where Pi still compacts.
+
 ## What these results do not show
 
 - One codebase and one kind of task (feature work in a TypeScript monorepo).
@@ -104,5 +113,5 @@ Both arms lost incidental details after compaction, because Pi's compaction summ
 
 - **Commit recognition.** Haiku often committed with `git commit -q` or chained commands, so the first versions missed most commits. The rule is now: a command segment that starts with `git commit` ran, the tool call did not fail, and it is not `--dry-run`. Replaying 121 real commits from four runs, all were recognized with no false positives.
 - **Test commands.** `pnpm --filter <pkg> test` was not recognized as a test, and `test | tail` reported the exit code of `tail`. Tests with arguments are now recognized, and piped commands without `pipefail` are not treated as results.
-- **Inherited environment variable.** SmartCompact moves Claude's native compaction point through `CLAUDE_CODE_AUTO_COMPACT_WINDOW`; a harness started from a session with SmartCompact installed inherited it. The harness now removes it, the affected run was discarded, and the README notes this side effect.
+- **Inherited environment variable.** SmartCompact moves Claude's native compaction point through `CLAUDE_CODE_AUTO_COMPACT_WINDOW`; a harness started from a session with SmartCompact installed inherited it. The harness now removes it and the affected run was discarded. Since 0.1.3 SmartCompact no longer sets the variable.
 - **Harness scoring.** Under heavy machine load, the harness took the result of SmartCompact's queued `/compact` as the answer to the next message, so three recall rounds were scored 0. The harness now skips compaction results, and all runs were rescored from their event logs with `eval/recall-from-log.py` (the table above uses the rescored values; runs without the problem were unchanged).

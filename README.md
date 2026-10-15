@@ -14,8 +14,8 @@
 Every request re-reads the whole context, so a long context makes every step expensive. Native auto-compaction waits until the context is nearly full (close to 1M tokens in Claude Code, up to 800k in Codex if configured), and it ignores timing, so it often lands in the middle of a task. SmartCompact works with Claude Code (CLI and desktop app), [Pi](https://github.com/earendil-works/pi) and the Codex CLI:
 
 - **Compact at a good moment.** Once the context passes the **allow line** (200k tokens by default), it compacts when a turn ends, if a piece of work has been finished since the last compaction (a commit, tests passing, a task completed).
-- **Never in the middle of work.** It only decides when a turn ends, never mid-turn, and it waits while tests or the build are failing, errors keep repeating, or a background job is running.
-- **A fallback.** If no good moment comes and the context passes the **grace line** (allow line × 1.3), it compacts at the end of a turn.
+- **Never in the middle of work.** It only decides when a turn ends, never mid-turn, and it waits while tests or the build are failing or errors keep repeating.
+- **No limit of its own.** If no piece of work gets finished, the agent is usually deep in one large task, which is when a large context pays off. SmartCompact leaves it alone, and the platform's native compaction applies as it would without the plugin.
 - **A progress ledger bridges the gap.** Files changed, the latest commit and test result, and decisions the agent recorded are handed back to the model after compaction.
 - **No pointless compactions.** It skips compaction when it would not free enough space.
 
@@ -41,7 +41,7 @@ Cost is converted to cached-input-token equivalents using each provider's price 
 /plugin install smartcompact@smartcompact
 ```
 
-It takes effect in new sessions. The plugin moves the native auto-compaction to about the grace line; `/smartcompact pause` returns the current session to native behavior.
+It takes effect in new sessions. `/smartcompact pause` turns it off for the current session.
 
 **Pi**
 
@@ -60,23 +60,22 @@ codex plugin add smartcompact@smartcompact
 
 Trust the plugin's 4 hooks when Codex asks on its next start. The hooks find a Node.js 22.18+ on their own (`PATH`, nvm, Homebrew; or set `SMARTCOMPACT_NODE`); without one they do nothing. To update, run `codex plugin marketplace upgrade smartcompact` and then the `codex plugin add` command again. If you installed an earlier version with `node scripts/codex.ts install`, run `node scripts/codex.ts uninstall` in that clone once, so the hooks do not run twice.
 
-Codex hooks cannot postpone a compaction in the middle of a turn, so SmartCompact decides when a turn ends and, if it should compact, starts the compaction through Codex's shared background server once the session is idle (the interactive UI uses it by default). `codex exec` does not use the shared server by default, and the Codex App (ChatGPT.app) currently cannot; there SmartCompact only hands back the progress ledger, and compaction follows Codex's native rules. For a fallback there, add Codex's own `model_post_turn_compact_threshold_percent` at the top of `config.toml`: it compacts after a turn ends once the context passes that percentage of the usable window (31 is about 260k for an 872k window; see the test report).
+Codex hooks cannot postpone a compaction in the middle of a turn, so SmartCompact decides when a turn ends and, if it should compact, starts the compaction through Codex's shared background server once the session is idle (the interactive UI uses it by default). `codex exec` does not use the shared server by default, and the Codex App (ChatGPT.app) currently cannot; there SmartCompact only hands back the progress ledger, and compaction follows Codex's native rules. If you want compaction to come earlier there, add Codex's own `model_post_turn_compact_threshold_percent` at the top of `config.toml`: it compacts after a turn ends once the context passes that percentage of the usable window (31 is about 260k for an 872k window; see the test report).
 
 ## Settings
 
 | Setting | Default | Meaning |
 |---|---|---|
 | Allow line | 200000 | Above it, compact when a turn ends once a piece of work has been finished |
-| Grace factor | 1.3 | Above allow line × factor, stop waiting for a finished piece of work |
 | Minimum freed | 60000 | Skip compaction if it is expected to free less than this |
 
-- Claude Code: the plugin options `allowLineTokens`, `graceFactor` and `minFreedTokens`; leave them empty for the defaults.
-- Pi: the flags `--smartcompact-allow-line`, `--smartcompact-grace` and `--smartcompact-min-freed`.
-- Codex: the environment variables `SMARTCOMPACT_ALLOW_LINE`, `SMARTCOMPACT_GRACE` and `SMARTCOMPACT_MIN_FREED`.
+- Claude Code: the plugin options `allowLineTokens` and `minFreedTokens`; leave them empty for the defaults.
+- Pi: the flags `--smartcompact-allow-line` and `--smartcompact-min-freed`.
+- Codex: the environment variables `SMARTCOMPACT_ALLOW_LINE` and `SMARTCOMPACT_MIN_FREED`.
 
 ## Seeing what it did
 
-- Claude Code and Pi: `/smartcompact` (or `/smartcompact report`) shows the three lines, the finished-work signals it saw and a cost estimate; `/smartcompact pause` and `resume` turn it off and on for the session. The model can also call a `checkpoint` tool to record decisions, which come back with the ledger after compaction.
+- Claude Code and Pi: `/smartcompact` (or `/smartcompact report`) shows the allow line, the native compaction point, the finished-work signals it saw and a cost estimate; `/smartcompact pause` and `resume` turn it off and on for the session. The model can also call a `checkpoint` tool to record decisions, which come back with the ledger after compaction.
 - Codex: `node ~/.codex/plugins/cache/smartcompact/smartcompact/<version>/adapters/codex/report.ts <session ID>` (Node.js 22.18+); records are kept in `~/.codex/smartcompact/`.
 
 ## FAQ
@@ -85,7 +84,7 @@ Codex hooks cannot postpone a compaction in the middle of a turn, so SmartCompac
 
 **Will the model forget things after compaction?** Sometimes, for details mentioned in passing. The ledger only records files, commits, tests and decisions the model chose to record. Details the user mentions in passing are kept by asking the compaction summary to keep every specific fact the user stated. On Pi this clearly reduced losses, but it is not a guarantee.
 
-**Anything specific to Claude Code?** SmartCompact's fallback point is close to the native compaction point it moves. If it cannot recognize a finished piece of work for a long time, native compaction may still fire mid-turn. SmartCompact moves the native compaction point by setting `CLAUDE_CODE_AUTO_COMPACT_WINDOW` in the session, and processes started from that session inherit it: a `claude -p` or script the agent runs will compact at about 260k as well. Unset the variable for such processes if that matters.
+**Does it change Claude Code's own settings?** No. Native auto-compaction stays where it is (close to 1M). Versions up to 0.1.2 moved it to about 260k by setting `CLAUDE_CODE_AUTO_COMPACT_WINDOW` in the session (which child processes inherited) and also compacted there without a finished piece of work. 0.1.3 removed both: a long task is no longer cut off at a fixed size.
 
 **How do I remove it?**
 

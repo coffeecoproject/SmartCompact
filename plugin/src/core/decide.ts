@@ -1,4 +1,4 @@
-// 两个决策函数：一轮结束时要不要主动压缩；一轮进行中原生自动压缩来问时放不放行。
+// 两个决策函数：一轮结束时要不要主动压缩；一轮进行中原生自动压缩来问时放不放行（只有原生压缩点能提前的平台用到，目前是 pi）。
 // 读不到用量时一律不干预，按原生行为来。
 
 import type { Lines } from './lines.ts'
@@ -18,7 +18,7 @@ export type DecisionInput = {
 export type TurnEndDecision =
   | { action: 'none'; reason: 'paused' | 'no-reading' | 'below-line' }
   | { action: 'wait'; reason: HardSignal | 'insufficient-benefit' | 'waiting-for-milestone' }
-  | { action: 'compact'; reason: MilestoneSource | 'past-grace' }
+  | { action: 'compact'; reason: MilestoneSource }
 
 export type MidTurnDecision =
   | { action: 'allow'; reason: 'paused' | 'no-reading' | 'at-ceiling' | 'default' }
@@ -37,7 +37,7 @@ export function decideAtTurnEnd(input: DecisionInput, params: Params): TurnEndDe
   if (hard) return { action: 'wait', reason: hard }
   if (!freesEnough(tokens, input, params)) return { action: 'wait', reason: 'insufficient-benefit' }
   if (work.milestone) return { action: 'compact', reason: work.milestone }
-  if (tokens >= lines.midTurn) return { action: 'compact', reason: 'past-grace' }
+  // 不设兜底线：一直等不到做完一件事，多半是在做一件大活，正需要大上下文；交给原生在上限处压缩。
   return { action: 'wait', reason: 'waiting-for-milestone' }
 }
 

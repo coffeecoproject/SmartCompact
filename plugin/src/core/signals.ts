@@ -9,11 +9,10 @@ export type Signal =
   | { kind: 'task-completed' }
   | { kind: 'checkpoint'; milestone: boolean }
   | { kind: 'tool-result'; isError: boolean }
-  | { kind: 'background'; running: number }
 
 export type MilestoneSource = 'commit' | 'tests-passed' | 'task-completed' | 'checkpoint'
 
-export type HardSignal = 'tests-failing' | 'build-failing' | 'error-streak' | 'background-running'
+export type HardSignal = 'tests-failing' | 'build-failing' | 'error-streak'
 
 export type WorkState = {
   /** 自上次压缩以来最近的阶段节点 */
@@ -21,7 +20,6 @@ export type WorkState = {
   testsFailing: boolean
   buildFailing: boolean
   errorStreak: number
-  backgroundRunning: number
 }
 
 export const INITIAL_WORK_STATE: WorkState = Object.freeze({
@@ -29,7 +27,6 @@ export const INITIAL_WORK_STATE: WorkState = Object.freeze({
   testsFailing: false,
   buildFailing: false,
   errorStreak: 0,
-  backgroundRunning: 0,
 })
 
 /** 这个信号代表哪种阶段节点，不是阶段节点时为 null。 */
@@ -49,7 +46,9 @@ export function milestoneOf(signal: Signal): MilestoneSource | null {
 }
 
 export function applySignal(state: WorkState, signal: Signal): WorkState {
-  const next = { ...state, milestone: milestoneOf(signal) ?? state.milestone }
+  const milestone = milestoneOf(signal)
+  // 失败之后又做完了一件事（比如提交、checkpoint），那段失败就算过去了，不再挡着压缩。
+  const next = milestone ? { ...state, milestone, testsFailing: false, buildFailing: false } : state
   switch (signal.kind) {
     case 'tests':
       return { ...next, testsFailing: !signal.passed }
@@ -57,14 +56,12 @@ export function applySignal(state: WorkState, signal: Signal): WorkState {
       return { ...next, buildFailing: !signal.passed }
     case 'tool-result':
       return { ...next, errorStreak: signal.isError ? state.errorStreak + 1 : 0 }
-    case 'background':
-      return { ...next, backgroundRunning: Math.max(0, signal.running) }
     default:
       return next
   }
 }
 
-/** 压缩后清空阶段节点；失败、后台任务这些仍然成立的事实保留。 */
+/** 压缩后清空阶段节点；失败这些仍然成立的事实保留。 */
 export function afterCompaction(state: WorkState): WorkState {
   return { ...state, milestone: null }
 }
@@ -74,6 +71,5 @@ export function hardSignal(state: WorkState, params: Params): HardSignal | null 
   if (state.testsFailing) return 'tests-failing'
   if (state.buildFailing) return 'build-failing'
   if (state.errorStreak >= params.errorStreakLimit) return 'error-streak'
-  if (state.backgroundRunning > 0) return 'background-running'
   return null
 }

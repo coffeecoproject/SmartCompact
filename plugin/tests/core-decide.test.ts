@@ -1,12 +1,11 @@
 import { describe, expect, test } from 'claude-code/testing'
 import { type DecisionInput, decideAtTurnEnd, decideMidTurn } from '../src/core/decide.ts'
-import { planLines } from '../src/core/lines.ts'
 import { DEFAULT_PARAMS, resolveParams } from '../src/core/params.ts'
 import { INITIAL_WORK_STATE, type WorkState } from '../src/core/signals.ts'
 
 const params = DEFAULT_PARAMS
-// 1M 窗口：L=200k，M=260k，C=967k
-const lines = planLines(1_000_000, params)
+// 1M 窗口：L=200k，C=967k
+const lines = { allow: 200_000, ceiling: 967_000 }
 const input = (tokens: number | undefined, work: Partial<WorkState> = {}, extra: Partial<DecisionInput> = {}): DecisionInput => ({
   tokens,
   lines,
@@ -34,21 +33,19 @@ describe('一轮结束时', () => {
     expect(decideAtTurnEnd(input(210_000, { milestone: 'commit', testsFailing: true }), params)).toEqual({ action: 'wait', reason: 'tests-failing' })
   })
 
-  test('后台任务还在跑或连续报错时等待', () => {
-    expect(decideAtTurnEnd(input(210_000, { milestone: 'commit', backgroundRunning: 1 }), params).reason).toBe('background-running')
+  test('连续报错时等待', () => {
     expect(decideAtTurnEnd(input(210_000, { milestone: 'commit', errorStreak: 3 }), params).reason).toBe('error-streak')
   })
 
-  test('没有阶段节点时在宽限区内等待，超过兜底线就压缩', () => {
+  test('没有阶段节点时一直等待，不设插件自己的兜底，交给原生在上限处压缩', () => {
     expect(decideAtTurnEnd(input(230_000), params)).toEqual({ action: 'wait', reason: 'waiting-for-milestone' })
-    expect(decideAtTurnEnd(input(260_000), params)).toEqual({ action: 'compact', reason: 'past-grace' })
+    expect(decideAtTurnEnd(input(600_000), params)).toEqual({ action: 'wait', reason: 'waiting-for-milestone' })
   })
 
   test('腾不出足够空间时等待，防止连续压缩', () => {
     // 第 0 步实测的情况：线约 67k、压缩后约 51k，每读一个文件就压缩一次
     const low = resolveParams({ allowLineTokens: 67_000 })
-    const lowLines = planLines(1_000_000, low)
-    const thrash = { ...input(75_000, { milestone: 'commit' }), lines: lowLines, expectedAfterTokens: 51_000 }
+    const thrash = { ...input(75_000, { milestone: 'commit' }), lines: { ...lines, allow: 67_000 }, expectedAfterTokens: 51_000 }
     expect(decideAtTurnEnd(thrash, low)).toEqual({ action: 'wait', reason: 'insufficient-benefit' })
   })
 })

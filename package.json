@@ -1,6 +1,6 @@
 {
   "name": "smartcompact",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "type": "module",
   "description": "Compact long agent sessions earlier, at a finished piece of work, to cut cost without losing results (Claude Code, pi, Codex)",
   "license": "MIT",

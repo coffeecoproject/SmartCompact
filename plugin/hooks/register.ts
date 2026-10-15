@@ -3,9 +3,9 @@
 // 每个会拦截的 hook 都带 .catch：插件出错时退回原生行为。
 
 import type { EngineInterface, Register } from 'claude-code'
-import { decideAtTurnEnd, decideMidTurn, shouldNudge } from '../src/core/decide.ts'
+import { decideAtTurnEnd, shouldNudge } from '../src/core/decide.ts'
 import { applyCheckpoint, CHECKPOINT_INPUT_SCHEMA, COMPACT_INSTRUCTIONS, isLedgerText, parseCheckpoint, renderLedger } from '../src/core/ledger.ts'
-import { type Lines, nativeSettingFor, planLines } from '../src/core/lines.ts'
+import type { Lines } from '../src/core/lines.ts'
 import { type Params, resolveParams } from '../src/core/params.ts'
 import { countDecisions, renderReport } from '../src/core/report.ts'
 import { pricesFor } from '../src/core/usage.ts'
@@ -62,7 +62,7 @@ async function saveSession($: EngineInterface, state: SessionState): Promise<voi
 
 async function loadLines($: EngineInterface): Promise<Lines | null> {
   const { native } = await loadRecord($)
-  return native ? planLines(native.originalSetting, params) : null
+  return native ? { allow: params.allowLineTokens, ceiling: native.originalSetting - params.nativeBufferTokens } : null
 }
 
 /** 只保留最近 RECORD_LIMIT 个会话的记录。 */
@@ -84,20 +84,6 @@ async function sample($: EngineInterface, state: SessionState, lines: Lines | nu
   const tokens = (await $.session.usage()).context.tokens
   if (tokens === undefined || !lines) return { tokens, state }
   return { tokens, state: withSample(state, tokens, lines.ceiling, CLAUDE_PRICES) }
-}
-
-/** 按暂停状态设置或恢复会话内的原生压缩线。 */
-async function applyNativeSetting($: EngineInterface, paused: boolean): Promise<number | null> {
-  const { native } = await loadRecord($)
-  if (!native) return null
-  const lines = planLines(native.originalSetting, params)
-  if (paused || !lines.adjustsNative) {
-    await $.env.set('CLAUDE_CODE_AUTO_COMPACT_WINDOW', native.originalEnv ?? undefined)
-    return null
-  }
-  const setting = nativeSettingFor(lines, params)
-  await $.env.set('CLAUDE_CODE_AUTO_COMPACT_WINDOW', String(setting))
-  return setting
 }
 
 async function compactNow($: EngineInterface, ticket: object): Promise<void> {
@@ -137,8 +123,7 @@ async function runCommand($: EngineInterface, args: string): Promise<string> {
   if (action === 'pause' || action === 'resume') {
     const paused = action === 'pause'
     await saveSession($, { ...state, paused })
-    await applyNativeSetting($, paused)
-    return paused ? 'SmartCompact 已暂停：本会话不再干预压缩，原生压缩线已恢复。' : 'SmartCompact 已恢复。'
+    return paused ? 'SmartCompact 已暂停：本会话不再主动压缩。' : 'SmartCompact 已恢复。'
   }
   if (action !== 'report') return '用法：/smartcompact [report|pause|resume]'
   const lines = await loadLines($)
@@ -159,21 +144,17 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     const result = await next(e)
     try {
-      // 重新加载或恢复会话时沿用第一次记下的原生压缩线，不把插件自己的设置当成原值。
+      // 记下原生压缩线，用于成本估算的对比；插件不调整它。
       const record = await loadRecord($)
       if (!record.native) {
         const { context } = await $.session.usage({ breakdown: 'summary' })
-        const native: NativeSetup = {
-          originalSetting: context.breakdown?.rawMaxTokens ?? context.window,
-          originalEnv: (await $.env.get('CLAUDE_CODE_AUTO_COMPACT_WINDOW')) ?? null,
-        }
+        const native: NativeSetup = { originalSetting: context.breakdown?.rawMaxTokens ?? context.window }
         await saveRecord($, { ...record, native })
         await pruneRecords($)
       }
-      const setting = await applyNativeSetting($, (await loadSession($)).paused)
       await $.tool.register({ name: 'checkpoint', description: CHECKPOINT_DESCRIPTION, inputSchema: CHECKPOINT_INPUT_SCHEMA, isDeferred: false })
       await $.command.register({ name: 'smartcompact', description: 'SmartCompact：report 查看效果，pause / resume 暂停或恢复', argumentHint: '[report|pause|resume]' })
-      await log($, { event: 'setup', detail: JSON.stringify({ lines: await loadLines($), nativeSetting: setting }) })
+      await log($, { event: 'setup', detail: JSON.stringify({ lines: await loadLines($) }) })
     } catch (error) {
       await log($, { event: 'error', reason: 'session.start', detail: String(error) })
     }
@@ -224,12 +205,6 @@ export const register: Register = (on, options) => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
-  on('classic.Stop', async ($, e, next) => {
-    const state = await loadSession($)
-    await saveSession($, withSignals(state, [{ kind: 'background', running: e.background_tasks?.length ?? 0 }]))
-    return next(e)
-  }).catch(($, e, next) => next(e))
-
   on('prompt.submit', async ($, e, next) => {
     pendingCompaction = null
     const context = [...(e.context ?? [])]
@@ -274,25 +249,9 @@ export const register: Register = (on, options) => {
   })
 
   on('session.compact', async ($, e, next) => {
-    // 子 agent 自己的压缩和提前计算的摘要不干预。
+    // 子 agent 自己的压缩和提前计算的摘要不干预；原生自动压缩只在快满时发生，一律放行，压缩后补回笔记。
     if (e.agentId || e.trigger === 'precompute') return next(e)
     let state = await loadSession($)
-    if (e.trigger === 'auto') {
-      const lines = await loadLines($)
-      if (lines) {
-        const read = await sample($, state, lines)
-        state = read.state
-        const decision = decideMidTurn(
-          { tokens: read.tokens, lines, work: state.work, expectedAfterTokens: expectedAfterTokens(state, params.defaultAfterTokens), paused: state.paused },
-          params,
-        )
-        await log($, { event: 'mid-turn', action: decision.action, reason: decision.reason, tokens: read.tokens })
-        if (decision.action === 'veto') {
-          await saveSession($, state)
-          return { skip: `SmartCompact: deferred (${decision.reason})` }
-        }
-      }
-    }
     const ours = e.trigger === 'manual' && queuedCompaction
     queuedCompaction = false
     const result = await next(e)

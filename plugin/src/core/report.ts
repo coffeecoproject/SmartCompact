@@ -29,10 +29,10 @@ export function renderReport(input: {
   const seen = state.seen
   return [
     `SmartCompact${state.paused ? '（已暂停）' : ''}`,
-    `- 当前用量 ${k(tokens)}；允许压缩线 ${k(lines.allow)}，兜底线 ${k(lines.midTurn)}，上限 ${k(lines.ceiling)}${lines.adjustsNative ? '' : '（原生压缩线未调整）'}`,
+    `- 当前用量 ${k(tokens)}；允许压缩线 ${k(lines.allow)}，原生压缩点 ${k(lines.ceiling)}`,
     `- 本会话压缩 ${state.compactions} 次；最近一次压缩后约 ${k(state.measuredAfterTokens)}`,
     `- 本会话决策：插件压缩 ${(counts['compacted:plugin'] ?? 0) + (counts['compacted:plugin-queued'] ?? 0)}，自动压缩放行 ${counts['compacted:auto'] ?? 0}，手动压缩 ${counts['compacted:manual'] ?? 0}，轮中否决 ${counts['mid-turn:veto'] ?? 0}，轮末等待 ${counts['turn-end:wait'] ?? 0}`,
-    `- 信号：提交 ${seen.commit}，测试通过 ${seen['tests-passed']}，任务完成 ${seen['task-completed']}，checkpoint 完成 ${seen.checkpoint}，后台任务 ${seen.background}`,
+    `- 信号：提交 ${seen.commit}，测试通过 ${seen['tests-passed']}，任务完成 ${seen['task-completed']}，checkpoint 完成 ${seen.checkpoint}`,
     `- 当前状态：${state.work.milestone ? `已到阶段节点（${state.work.milestone}）` : '等待阶段节点'}${state.work.testsFailing ? '，测试失败中' : ''}${state.work.buildFailing ? '，构建失败中' : ''}`,
     ratio === undefined
       ? '- 成本估算：还没有读数'

@@ -31,20 +31,13 @@ const number = (name: string): number | undefined => Number(process.env[name]) |
 export const params = () =>
   resolveParams({
     allowLineTokens: number('SMARTCOMPACT_ALLOW_LINE'),
-    graceFactor: number('SMARTCOMPACT_GRACE'),
     minFreedTokens: number('SMARTCOMPACT_MIN_FREED'),
     defaultAfterTokens: CODEX_AFTER_TOKENS,
   })
 
-/** 兜底线只用于一轮结束时的宽限判断；上限是 Codex 原生的自动压缩线。 */
+/** 上限是 Codex 原生的自动压缩线。 */
 export function linesFor(window: number | undefined): Lines {
-  const current = params()
-  return {
-    allow: current.allowLineTokens,
-    midTurn: Math.round(current.allowLineTokens * current.graceFactor),
-    ceiling: nativeAutoCompactLimit() ?? Math.round((window ?? 272_000) * 0.9),
-    adjustsNative: false,
-  }
+  return { allow: params().allowLineTokens, ceiling: nativeAutoCompactLimit() ?? Math.round((window ?? 272_000) * 0.9) }
 }
 
 type Payload = {

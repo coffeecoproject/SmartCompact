@@ -1,8 +1,7 @@
 // SmartCompact 的 pi 扩展：把 pi 的事件接到 core 的决策上。
-// 和 Claude 版的区别：插件改不了 pi 的原生压缩线。
-// - 兜底线 = pi 配置的原生压缩点（窗口 − reserveTokens），上限 = 窗口 − pi 默认预留。
-// - 默认配置下两者相同，插件只在 agent_settled（不会再自动继续时）挑阶段节点主动压缩；
-//   用户把 reserveTokens 调大、让原生压缩提前时，插件在提前的那个点按工作状态决定是否取消。
+// - 插件在 agent_settled（不会再自动继续时）挑做完一件事的时机主动压缩；等不到就交给 pi 原生压缩。
+// - 上限 = 窗口 − pi 默认预留。用户把 reserveTokens 调大、让原生压缩提前时，
+//   插件在提前的那个点按工作状态决定是否取消，最晚到上限放行。
 
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent'
 import { SettingsManager } from '@earendil-works/pi-coding-agent'
@@ -41,7 +40,6 @@ const nudgeText = (tokens: number): string =>
 
 export default function smartCompact(pi: ExtensionAPI) {
   pi.registerFlag('smartcompact-allow-line', { description: 'SmartCompact 允许压缩线（token）', type: 'string' })
-  pi.registerFlag('smartcompact-grace', { description: 'SmartCompact 宽限倍数', type: 'string' })
   pi.registerFlag('smartcompact-min-freed', { description: 'SmartCompact 最少腾出空间（token）', type: 'string' })
 
   let state: SessionState = INITIAL_SESSION_STATE
@@ -64,7 +62,6 @@ export default function smartCompact(pi: ExtensionAPI) {
   const params = (ctx: ExtensionContext) =>
     resolveParams({
       allowLineTokens: Number(pi.getFlag('smartcompact-allow-line')) || undefined,
-      graceFactor: Number(pi.getFlag('smartcompact-grace')) || undefined,
       minFreedTokens: Number(pi.getFlag('smartcompact-min-freed')) || undefined,
       defaultAfterTokens: compactionSettings(ctx).keepRecent + PI_AFTER_OVERHEAD,
     })
@@ -73,21 +70,17 @@ export default function smartCompact(pi: ExtensionAPI) {
     const usage = ctx.getContextUsage()
     if (!usage) return null
     const { reserve } = compactionSettings(ctx)
-    return {
-      allow: params(ctx).allowLineTokens,
-      midTurn: usage.contextWindow - reserve,
-      ceiling: usage.contextWindow - Math.min(reserve, PI_DEFAULT_RESERVE),
-      adjustsNative: false,
-    }
+    return { allow: params(ctx).allowLineTokens, ceiling: usage.contextWindow - Math.min(reserve, PI_DEFAULT_RESERVE) }
   }
 
   const tokensOf = (ctx: ExtensionContext): number | undefined => ctx.getContextUsage()?.tokens ?? undefined
 
-  // 成本估算对比的是"没有插件时"：pi 原生会在它配置的压缩点（兜底线）压缩，而不是等到真正的极限。
+  // 成本估算对比的是"没有插件时"：pi 原生会在它配置的压缩点（窗口 − reserveTokens）压缩，而不是等到真正的极限。
   const sample = (ctx: ExtensionContext, current: Lines | null) => {
     const tokens = tokensOf(ctx)
+    const window = ctx.getContextUsage()?.contextWindow
     const model = `${ctx.model?.provider ?? ''} ${ctx.model?.id ?? ''}`
-    if (tokens !== undefined && current) state = withSample(state, tokens, current.midTurn, pricesFor(model))
+    if (tokens !== undefined && current && window) state = withSample(state, tokens, window - compactionSettings(ctx).reserve, pricesFor(model))
     return tokens
   }
 

@@ -4,7 +4,7 @@ import { EMPTY_LEDGER, type Ledger } from './ledger.ts'
 import { afterCompaction, applySignal, INITIAL_WORK_STATE, milestoneOf, type MilestoneSource, type Signal, type WorkState } from './signals.ts'
 import { EMPTY_TALLY, type Prices, recordCompaction, recordSample, type UsageTally } from './usage.ts'
 
-export type SignalsSeen = Record<MilestoneSource | 'background', number>
+export type SignalsSeen = Record<MilestoneSource, number>
 
 export type SessionState = {
   work: WorkState
@@ -29,7 +29,7 @@ export const INITIAL_SESSION_STATE: SessionState = Object.freeze({
   paused: false,
   notesUpdated: false,
   nudged: false,
-  seen: Object.freeze({ commit: 0, 'tests-passed': 0, 'task-completed': 0, checkpoint: 0, background: 0 }),
+  seen: Object.freeze({ commit: 0, 'tests-passed': 0, 'task-completed': 0, checkpoint: 0 }),
   usage: EMPTY_TALLY,
 }) as SessionState
 
@@ -51,7 +51,6 @@ export function withSignals(state: SessionState, signals: readonly Signal[]): Se
   for (const signal of signals) {
     const milestone = milestoneOf(signal)
     if (milestone) seen[milestone] += 1
-    if (signal.kind === 'background' && signal.running > 0) seen.background += 1
   }
   return { ...state, work: signals.reduce(applySignal, state.work), seen }
 }

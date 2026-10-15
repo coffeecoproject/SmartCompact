@@ -1,7 +1,7 @@
 {
   "name": "smartcompact",
   "displayName": "SmartCompact",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Compacts long sessions earlier, at a pause after a commit or passing tests, to cut cost without losing results",
   "author": {
     "name": "coffeecoproject"
@@ -17,11 +17,6 @@
       "type": "number",
       "title": "Allow line (tokens)",
       "description": "Above this context size, compact at the end of a turn once a piece of work has been finished. Leave empty for the default (200000)"
-    },
-    "graceFactor": {
-      "type": "number",
-      "title": "Grace factor",
-      "description": "Above allow line × this factor, stop waiting for a finished piece of work. Leave empty for the default (1.3)"
     },
     "minFreedTokens": {
       "type": "number",
