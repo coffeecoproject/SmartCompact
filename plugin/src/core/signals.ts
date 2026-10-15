@@ -17,6 +17,8 @@ export type HardSignal = 'tests-failing' | 'build-failing' | 'error-streak'
 export type WorkState = {
   /** 自上次压缩以来最近的阶段节点 */
   milestone: MilestoneSource | null
+  /** 最近的阶段节点出现时的上下文用量，用来看它到压缩时隔了多远 */
+  milestoneTokens?: number
   testsFailing: boolean
   buildFailing: boolean
   errorStreak: number
@@ -63,7 +65,7 @@ export function applySignal(state: WorkState, signal: Signal): WorkState {
 
 /** 压缩后清空阶段节点；失败这些仍然成立的事实保留。 */
 export function afterCompaction(state: WorkState): WorkState {
-  return { ...state, milestone: null }
+  return { ...state, milestone: null, milestoneTokens: undefined }
 }
 
 /** 表明工作做到一半的硬信号，没有则返回 null。 */

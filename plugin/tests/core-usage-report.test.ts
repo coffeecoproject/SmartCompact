@@ -2,7 +2,7 @@ import { describe, expect, test } from 'claude-code/testing'
 import { shouldNudge } from '../src/core/decide.ts'
 import { DEFAULT_PARAMS } from '../src/core/params.ts'
 import { countDecisions, renderReport } from '../src/core/report.ts'
-import { INITIAL_SESSION_STATE, withCompaction, withSample, withSignals } from '../src/core/state.ts'
+import { growthSinceMilestone, INITIAL_SESSION_STATE, withCompaction, withSample, withSignals } from '../src/core/state.ts'
 import { EMPTY_TALLY, pricesFor, recordCompaction, recordSample, savingsRatio } from '../src/core/usage.ts'
 
 const CEILING = 967_000
@@ -66,6 +66,15 @@ describe('会话状态', () => {
     state = withSample(state, 48_000, CEILING, PRICES)
     expect(state.measuredAfterTokens).toBe(48_000)
     expect(withSample(state, 52_000, CEILING, PRICES).measuredAfterTokens).toBe(48_000)
+  })
+
+  test('阶段节点记下当时的用量，压缩后清空', () => {
+    let state = withSample(INITIAL_SESSION_STATE, 150_000, CEILING, PRICES)
+    state = withSignals(state, [{ kind: 'commit' }])
+    state = withSignals(withSample(state, 180_000, CEILING, PRICES), [{ kind: 'tool-result', isError: false }])
+    expect(growthSinceMilestone(state.work, 230_000)).toBe(80_000)
+    state = withCompaction(state, 230_000, 3_000)
+    expect(growthSinceMilestone(state.work, 60_000)).toBeUndefined()
   })
 
   test('手动压缩不计入插件带来的节省', () => {

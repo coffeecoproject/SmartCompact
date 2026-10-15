@@ -14,6 +14,7 @@ import { countDecisions, renderReport } from '../../plugin/src/core/report.ts'
 import {
   type DecisionLogEntry,
   expectedAfterTokens,
+  growthSinceMilestone,
   INITIAL_SESSION_STATE,
   parseState,
   type SessionState,
@@ -184,7 +185,8 @@ export default function smartCompact(pi: ExtensionAPI) {
       { tokens, lines: current, work: state.work, expectedAfterTokens: expectedAfterTokens(state, params(ctx).defaultAfterTokens), paused: state.paused },
       params(ctx),
     )
-    if (decision.action !== 'none') log({ event: 'turn-end', action: decision.action, reason: decision.reason, tokens })
+    const sinceMilestoneTokens = decision.action === 'compact' ? growthSinceMilestone(state.work, tokens) : undefined
+    if (decision.action !== 'none') log({ event: 'turn-end', action: decision.action, reason: decision.reason, tokens, sinceMilestoneTokens })
     if (decision.action !== 'compact' || !ctx.isIdle() || ctx.hasPendingMessages()) return
     ours = true
     ctx.compact({

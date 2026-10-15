@@ -15,7 +15,7 @@ import { recordFileChanged, renderLedger } from '../../plugin/src/core/ledger.ts
 import type { Lines } from '../../plugin/src/core/lines.ts'
 import { resolveParams } from '../../plugin/src/core/params.ts'
 import type { Signal } from '../../plugin/src/core/signals.ts'
-import { expectedAfterTokens, withCompaction, withSample, withSignals } from '../../plugin/src/core/state.ts'
+import { expectedAfterTokens, growthSinceMilestone, withCompaction, withSample, withSignals } from '../../plugin/src/core/state.ts'
 import { pricesFor } from '../../plugin/src/core/usage.ts'
 import { MAX_WAIT_MS } from './compactor.ts'
 import { readRollout } from './rollout.ts'
@@ -56,6 +56,9 @@ function absorbRollout(session: CodexSession, payload: Payload): { session: Code
   if (!payload.transcript_path) return { session }
   const delta = readRollout(payload.transcript_path, session.rolloutOffset)
   let { state } = session
+  // 先记读数：阶段节点按一轮结束时的用量记位置（会话记录里命令和读数的先后对不上）。
+  const { ceiling } = linesFor(delta.window)
+  for (const tokens of delta.tokens) state = withSample(state, tokens, ceiling, pricesFor(payload.model ?? 'openai'))
   let ledger = state.ledger
   const signals: Signal[] = []
   for (const file of delta.files) ledger = recordFileChanged(ledger, file)
@@ -67,8 +70,6 @@ function absorbRollout(session: CodexSession, payload: Payload): { session: Code
     ledger = classified.ledger
   }
   state = withSignals({ ...state, ledger }, signals)
-  const { ceiling } = linesFor(delta.window)
-  for (const tokens of delta.tokens) state = withSample(state, tokens, ceiling, pricesFor(payload.model ?? 'openai'))
   return { session: { ...session, state, rolloutOffset: delta.offset }, window: delta.window }
 }
 
@@ -87,7 +88,9 @@ function onStop(sessionId: string, payload: Payload): void {
     },
     current,
   )
-  if (decision.action !== 'none') appendLog(sessionId, { event: 'turn-end', action: decision.action, reason: decision.reason, tokens: session.state.usage.lastTokens })
+  const tokens = session.state.usage.lastTokens
+  const sinceMilestoneTokens = decision.action === 'compact' ? growthSinceMilestone(session.state.work, tokens) : undefined
+  if (decision.action !== 'none') appendLog(sessionId, { event: 'turn-end', action: decision.action, reason: decision.reason, tokens, sinceMilestoneTokens })
   session = { ...session, compactWanted: decision.action === 'compact' }
   // 后台进程意外退出时请求会一直挂着；超过它的最长等待时间就当作失效，允许重新发起。
   const pending = session.compactRequestedAt !== undefined && Date.now() - session.compactRequestedAt < MAX_WAIT_MS + 60_000

@@ -45,14 +45,21 @@ export function expectedAfterTokens(state: SessionState, defaultAfterTokens: num
   return state.measuredAfterTokens ?? defaultAfterTokens
 }
 
-/** 应用信号，同时更新信号计数。 */
+/** 应用信号，同时更新信号计数；出现阶段节点时记下当时的上下文用量（最近一次读数）。 */
 export function withSignals(state: SessionState, signals: readonly Signal[]): SessionState {
   const seen = { ...state.seen }
+  let work = signals.reduce(applySignal, state.work)
   for (const signal of signals) {
     const milestone = milestoneOf(signal)
     if (milestone) seen[milestone] += 1
   }
-  return { ...state, work: signals.reduce(applySignal, state.work), seen }
+  if (signals.some(signal => milestoneOf(signal))) work = { ...work, milestoneTokens: state.usage.lastTokens }
+  return { ...state, work, seen }
+}
+
+/** 最近的阶段节点之后上下文又涨了多少；没有记录时为 undefined。 */
+export function growthSinceMilestone(work: WorkState, tokens: number | undefined): number | undefined {
+  return tokens === undefined || work.milestoneTokens === undefined ? undefined : tokens - work.milestoneTokens
 }
 
 /** 记一次用量读数：压缩后的第一次读数同时记为实测的压缩后大小。 */
@@ -86,6 +93,8 @@ export type DecisionLogEntry = {
   tokens?: number
   tokensBefore?: number
   tokensAfter?: number
+  /** 决定压缩时，距离最近的阶段节点上下文涨了多少 */
+  sinceMilestoneTokens?: number
   trigger?: string
   detail?: string
 }

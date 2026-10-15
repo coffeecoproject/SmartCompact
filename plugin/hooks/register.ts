@@ -12,6 +12,7 @@ import { pricesFor } from '../src/core/usage.ts'
 import {
   type DecisionLogEntry,
   expectedAfterTokens,
+  growthSinceMilestone,
   parseState,
   type SessionState,
   withCompaction,
@@ -41,8 +42,10 @@ let params: Params = resolveParams()
 let pendingCompaction: object | null = null
 /** 插件自己发起的压缩不经过本插件的 session.compact hook，笔记在下一条消息时补回。 */
 let ledgerToAttach: string | null = null
-/** 无界面会话里改为排队执行 /compact，它以 manual 触发经过本插件的 hook；据此认出是插件发起的。 */
+/** 无界面会话里改为排队执行 /compact，等空闲才运行；期间压缩过或用户发了新消息就作废。 */
 let queuedCompaction = false
+/** 排队的 /compact 正在运行：它的压缩以 manual 触发经过本插件的 hook，据此认出是插件发起的。 */
+let runningQueued = false
 
 async function loadRecord($: EngineInterface): Promise<SessionRecord> {
   return parseRecord(await $.store.get(`${RECORD_PREFIX}${await $.session.id()}`))
@@ -207,6 +210,7 @@ export const register: Register = (on, options) => {
 
   on('prompt.submit', async ($, e, next) => {
     pendingCompaction = null
+    queuedCompaction = false
     const context = [...(e.context ?? [])]
     if (ledgerToAttach) {
       context.push(ledgerToAttach)
@@ -235,7 +239,8 @@ export const register: Register = (on, options) => {
         { tokens, lines, work: state.work, expectedAfterTokens: expectedAfterTokens(state, params.defaultAfterTokens), paused: state.paused },
         params,
       )
-      if (decision.action !== 'none') await log($, { event: 'turn-end', action: decision.action, reason: decision.reason, tokens })
+      const sinceMilestoneTokens = decision.action === 'compact' ? growthSinceMilestone(state.work, tokens) : undefined
+      if (decision.action !== 'none') await log($, { event: 'turn-end', action: decision.action, reason: decision.reason, tokens, sinceMilestoneTokens })
       if (decision.action === 'compact') {
         const ticket = {}
         pendingCompaction = ticket
@@ -248,12 +253,28 @@ export const register: Register = (on, options) => {
     return result
   })
 
+  // 排队的 /compact 轮到时已经作废就不再压缩，以压缩说明认出是插件排的。
+  on('command.run', { command: 'compact' }, async ($, e, next) => {
+    if (e.args !== COMPACT_INSTRUCTIONS) return next(e)
+    if (!queuedCompaction) {
+      await log($, { event: 'compacted', action: 'skipped', trigger: 'plugin', detail: 'stale' })
+      return { text: 'SmartCompact: skipped a queued compaction that is no longer needed.' }
+    }
+    queuedCompaction = false
+    runningQueued = true
+    try {
+      return await next(e)
+    } finally {
+      runningQueued = false
+    }
+  }).catch(($, e, next) => next(e))
+
   on('session.compact', async ($, e, next) => {
     // 子 agent 自己的压缩和提前计算的摘要不干预；原生自动压缩只在快满时发生，一律放行，压缩后补回笔记。
     if (e.agentId || e.trigger === 'precompute') return next(e)
     let state = await loadSession($)
-    const ours = e.trigger === 'manual' && queuedCompaction
-    queuedCompaction = false
+    const ours = e.trigger === 'manual' && runningQueued
+    if (!ours) queuedCompaction = false
     const result = await next(e)
     if (result.skip !== undefined) return result
     state = withCompaction(state, result.tokensBefore ?? 0, result.tokensAfter ?? 0, e.trigger !== 'manual' || ours)

@@ -1,6 +1,6 @@
 {
   "name": "smartcompact",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Compacts long Codex sessions earlier, at a pause after a piece of work is finished, and hands a progress ledger back after compaction. Runs locally; no network requests.",
   "author": {
     "name": "coffeecoproject",

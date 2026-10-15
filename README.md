@@ -84,7 +84,9 @@ Codex hooks cannot postpone a compaction in the middle of a turn, so SmartCompac
 
 **Will the model forget things after compaction?** Sometimes, for details mentioned in passing. The ledger only records files, commits, tests and decisions the model chose to record. Details the user mentions in passing are kept by asking the compaction summary to keep every specific fact the user stated. On Pi this clearly reduced losses, but it is not a guarantee.
 
-**Does it change Claude Code's own settings?** No. Native auto-compaction stays where it is (close to 1M). Versions up to 0.1.2 moved it to about 260k by setting `CLAUDE_CODE_AUTO_COMPACT_WINDOW` in the session (which child processes inherited) and also compacted there without a finished piece of work. 0.1.3 removed both: a long task is no longer cut off at a fixed size.
+**Does it change Claude Code's own settings?** No. Native auto-compaction stays where it is (close to 1M). Versions up to 0.1.2 moved it to about 260k by setting `CLAUDE_CODE_AUTO_COMPACT_WINDOW` in the session (which child processes inherited) and also compacted there without a finished piece of work. 0.1.3 removed both: a long task is no longer cut off at a fixed size. A session opened on 0.1.2 or earlier keeps the old setting until you start a new one.
+
+**Does it help with a smaller context window?** Only when native compaction comes well after 200k. With a 200k window, native compaction comes first (about 167k in Claude Code) and SmartCompact never acts. On Codex's default 272k window, native compaction is at about 245k, which leaves only 200k–245k for SmartCompact, so it saves little unless `model_auto_compact_token_limit` is set higher. The allow line can be lowered (`allowLineTokens`, `--smartcompact-allow-line`, `SMARTCOMPACT_ALLOW_LINE`), but lower lines have not been evaluated.
 
 **How do I remove it?**
 
