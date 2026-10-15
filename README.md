@@ -6,12 +6,12 @@
 [![GitHub stars](https://img.shields.io/github/stars/coffeecoproject/SmartCompact?style=social)](https://github.com/coffeecoproject/SmartCompact/stargazers)
 [![License](https://img.shields.io/badge/license-MIT-blue)](https://github.com/coffeecoproject/SmartCompact/blob/main/LICENSE)
 
-**SmartCompact lets long coding-agent sessions compact earlier, right after a piece of work is finished.** On 18–60 consecutive coding tasks it cut cost by **7–44%** with no loss in hidden acceptance tests; the longer the session, the more it saves. In the longest runs (60 tasks, native sessions reaching 820k–960k tokens) the model missed 6 of 180 recall questions about details mentioned in passing much earlier ([test report](https://github.com/coffeecoproject/SmartCompact/blob/main/docs/TEST-REPORT.md), in Chinese).
+**SmartCompact lets long coding-agent sessions compact earlier, at a pause after a piece of work is finished.** On 18–60 consecutive coding tasks it cut cost by **7–44%** with no loss in hidden acceptance tests; the longer the session, the more it saves. In the longest runs (60 tasks, native sessions reaching 820k–960k tokens) the model missed 6 of 180 recall questions about details mentioned in passing much earlier ([test report](https://github.com/coffeecoproject/SmartCompact/blob/main/docs/TEST-REPORT.md), in Chinese).
 
 Every request re-reads the whole context, so a long context makes every step expensive. Native auto-compaction waits until the context is nearly full (close to 1M tokens in Claude Code, up to 800k in Codex if configured), and it ignores timing, so it often lands in the middle of a task. SmartCompact works with Claude Code (CLI and desktop app), [Pi](https://github.com/earendil-works/pi) and the Codex CLI:
 
-- **Compact at the right moment.** Once the context passes the **allow line** (200k tokens by default), it waits for a piece of work to finish: a commit, tests passing, a task completed.
-- **Never in the middle of work.** It does not compact on its own mid-task, nor while tests or the build are failing, errors keep repeating, or a background job is running.
+- **Compact at a good moment.** Once the context passes the **allow line** (200k tokens by default), it compacts when a turn ends, if a piece of work has been finished since the last compaction (a commit, tests passing, a task completed).
+- **Never in the middle of work.** It only decides when a turn ends, never mid-turn, and it waits while tests or the build are failing, errors keep repeating, or a background job is running.
 - **A fallback.** If no good moment comes and the context passes the **grace line** (allow line × 1.3), it compacts at the end of a turn.
 - **A progress ledger bridges the gap.** Files changed, the latest commit and test result, and decisions the agent recorded are handed back to the model after compaction.
 - **No pointless compactions.** It skips compaction when it would not free enough space.
@@ -64,7 +64,7 @@ Codex hooks cannot postpone a compaction in the middle of a turn, so SmartCompac
 
 | Setting | Default | Meaning |
 |---|---|---|
-| Allow line | 200000 | Above it, compact right after a piece of work is finished |
+| Allow line | 200000 | Above it, compact when a turn ends once a piece of work has been finished |
 | Grace factor | 1.3 | Above allow line × factor, stop waiting for a finished piece of work |
 | Minimum freed | 60000 | Skip compaction if it is expected to free less than this |
 
@@ -79,7 +79,7 @@ Codex hooks cannot postpone a compaction in the middle of a turn, so SmartCompac
 
 ## FAQ
 
-**How does it know a piece of work is finished?** From the commands the agent runs. A commit counts if `git commit` actually ran and the tool call did not fail. A test command piped into something else (`| tail`) without `pipefail` does not count, since its exit code cannot be trusted.
+**How does it know a piece of work is finished?** From the commands the agent runs. Any finished piece of work since the last compaction counts, not only one in the current turn: the end of a turn is already a pause, so waiting for the next commit would mostly just cost more. A commit counts if `git commit` actually ran and the tool call did not fail. A test command piped into something else (`| tail`) without `pipefail` does not count, since its exit code cannot be trusted.
 
 **Will the model forget things after compaction?** Sometimes, for details mentioned in passing. The ledger only records files, commits, tests and decisions the model chose to record. Details the user mentions in passing are kept by asking the compaction summary to keep every specific fact the user stated. On Pi this clearly reduced losses, but it is not a guarantee.
 
