@@ -35,7 +35,7 @@ export function renderReport(input: {
     `SmartCompact${state.paused ? '（已暂停）' : ''}`,
     `- 当前用量 ${k(tokens)}；允许压缩线 ${k(lines.allow)}，原生压缩点 ${k(lines.ceiling)}`,
     `- 本会话压缩 ${state.compactions} 次；最近一次压缩后约 ${k(state.measuredAfterTokens)}`,
-    `- 本会话决策：插件压缩 ${(counts['compacted:plugin'] ?? 0) + (counts['compacted:plugin-queued'] ?? 0)}，自动压缩放行 ${counts['compacted:auto'] ?? 0}，手动压缩 ${counts['compacted:manual'] ?? 0}，轮中否决 ${counts['mid-turn:veto'] ?? 0}，轮末等待 ${counts['turn-end:wait'] ?? 0}`,
+    `- 本会话决策：插件压缩 ${(counts['compacted:plugin'] ?? 0) + (counts['compacted:plugin-queued'] ?? 0)}，自动压缩放行 ${counts['compacted:auto'] ?? 0}，手动压缩 ${counts['compacted:manual'] ?? 0}，轮中否决 ${counts['mid-turn:veto'] ?? 0}，轮末等待 ${counts['turn-end:wait'] ?? 0}，提醒记笔记 ${counts['reminder:nudge'] ?? 0}，提醒标完成 ${counts['reminder:milestone'] ?? 0}`,
     `- 信号：提交 ${seen.commit}，测试通过 ${seen['tests-passed']}，任务完成 ${seen['task-completed']}，checkpoint 完成 ${seen.checkpoint}`,
     `- 当前状态：${milestoneStatus(state.work)}${state.work.testsFailing ? '，测试失败中' : ''}${state.work.buildFailing ? '，构建失败中' : ''}`,
     ratio === undefined

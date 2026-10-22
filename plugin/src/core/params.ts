@@ -17,6 +17,8 @@ export type Params = {
   ledgerMaxChars: number
   /** 用量到 L × 这个比例、笔记又没更新时，提醒模型记一下 */
   nudgeAtShare: number
+  /** 超过 L、在等做完一件事时，上下文每涨这么多提醒一次模型做完一步就标完成 */
+  remindEveryTokens: number
 }
 
 export const DEFAULT_PARAMS: Params = Object.freeze({
@@ -28,6 +30,7 @@ export const DEFAULT_PARAMS: Params = Object.freeze({
   errorStreakLimit: 3,
   ledgerMaxChars: 6_000,
   nudgeAtShare: 0.85,
+  remindEveryTokens: 100_000,
 })
 
 const MINIMUMS: Record<keyof Params, number> = {
@@ -39,6 +42,7 @@ const MINIMUMS: Record<keyof Params, number> = {
   errorStreakLimit: 1,
   ledgerMaxChars: 200,
   nudgeAtShare: 0,
+  remindEveryTokens: 1,
 }
 
 /** 用户覆盖的值逐项校验，不合法的项沿用默认值。 */

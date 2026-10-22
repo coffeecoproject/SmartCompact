@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
-import { shouldNudge } from '../src/core/decide.ts'
+import { shouldNudge, shouldRemindMilestone } from '../src/core/decide.ts'
 import { DEFAULT_PARAMS } from '../src/core/params.ts'
+import { checkpointNudge, milestoneReminder, promptReminder } from '../src/core/reminder.ts'
 import { countDecisions, renderReport } from '../src/core/report.ts'
 import { growthSinceMilestone, INITIAL_SESSION_STATE, type SessionState, withCompaction, withSample, withSignals } from '../src/core/state.ts'
 import { EMPTY_TALLY, pricesFor, recordCompaction, recordSample, savingsRatio } from '../src/core/usage.ts'
@@ -99,6 +100,72 @@ describe('提醒更新笔记', () => {
   })
 })
 
+describe('提醒做完一步就标完成', () => {
+  const waitAfterEdit = { action: 'wait', reason: 'changed-since-milestone' } as const
+  const waitNoMilestone = { action: 'wait', reason: 'waiting-for-milestone' } as const
+  test('超过允许线、在等做完一件事时提醒，之后每涨 10 万再提醒', () => {
+    expect(shouldRemindMilestone(waitAfterEdit, 210_000, undefined, DEFAULT_PARAMS)).toBe(true)
+    expect(shouldRemindMilestone(waitNoMilestone, 210_000, undefined, DEFAULT_PARAMS)).toBe(true)
+    expect(shouldRemindMilestone(waitAfterEdit, 300_000, 210_000, DEFAULT_PARAMS)).toBe(false)
+    expect(shouldRemindMilestone(waitAfterEdit, 310_000, 210_000, DEFAULT_PARAMS)).toBe(true)
+  })
+  test('因为测试失败等硬信号在等、可以压缩或没过线时不提醒', () => {
+    expect(shouldRemindMilestone({ action: 'wait', reason: 'tests-failing' }, 300_000, undefined, DEFAULT_PARAMS)).toBe(false)
+    expect(shouldRemindMilestone({ action: 'compact', reason: 'commit' }, 300_000, undefined, DEFAULT_PARAMS)).toBe(false)
+    expect(shouldRemindMilestone({ action: 'none', reason: 'below-line' }, 150_000, undefined, DEFAULT_PARAMS)).toBe(false)
+  })
+  test('压缩后重新开始计算', () => {
+    const state = withCompaction({ ...INITIAL_SESSION_STATE, remindedAtTokens: 300_000 }, 300_000, 3_000)
+    expect(state.remindedAtTokens).toBeUndefined()
+  })
+})
+
+describe('用户发消息前的提醒', () => {
+  const lines = { allow: 200_000, ceiling: 967_000 }
+  const tool = 'checkpoint'
+  test('快到允许线时提醒记笔记，过线在等做完一件事时提醒标完成，都记日志', () => {
+    const nudge = promptReminder(INITIAL_SESSION_STATE, 170_000, lines, DEFAULT_PARAMS, tool)
+    expect(nudge?.text).toBe(checkpointNudge(170_000, tool))
+    expect(nudge?.state.nudged).toBe(true)
+    expect(nudge?.log).toEqual({ event: 'reminder', action: 'nudge', reason: 'notes-not-updated', tokens: 170_000 })
+    const remind = promptReminder(INITIAL_SESSION_STATE, 210_000, lines, DEFAULT_PARAMS, tool)
+    expect(remind?.text).toBe(milestoneReminder(210_000, tool))
+    expect(remind?.state).toEqual(expect.objectContaining({ nudged: true, remindedAtTokens: 210_000 }))
+    expect(remind?.log).toEqual({ event: 'reminder', action: 'milestone', reason: 'waiting-for-milestone', tokens: 210_000 })
+  })
+  test('提醒过之后不重复，涨够了再提醒标完成', () => {
+    const reminded = promptReminder(INITIAL_SESSION_STATE, 210_000, lines, DEFAULT_PARAMS, tool)!.state
+    expect(promptReminder(reminded, 300_000, lines, DEFAULT_PARAMS, tool)).toBeUndefined()
+    expect(promptReminder(reminded, 310_000, lines, DEFAULT_PARAMS, tool)?.text).toBe(milestoneReminder(310_000, tool))
+  })
+  test('读不到用量或暂停时不提醒', () => {
+    expect(promptReminder(INITIAL_SESSION_STATE, undefined, lines, DEFAULT_PARAMS, tool)).toBeUndefined()
+    expect(promptReminder({ ...INITIAL_SESSION_STATE, paused: true }, 250_000, lines, DEFAULT_PARAMS, tool)).toBeUndefined()
+  })
+  test('做完一件事之后又改了文件、在等下一件时提醒标完成', () => {
+    const work = { ...INITIAL_SESSION_STATE.work, milestone: 'checkpoint', changedSinceMilestone: true } as const
+    const remind = promptReminder({ ...INITIAL_SESSION_STATE, work }, 250_000, lines, DEFAULT_PARAMS, tool)
+    expect(remind?.text).toBe(milestoneReminder(250_000, tool))
+    expect(remind?.log).toEqual({ event: 'reminder', action: 'milestone', reason: 'changed-since-milestone', tokens: 250_000 })
+  })
+  test('笔记已更新、记笔记的提醒也发过，过线在等时仍提醒标完成', () => {
+    const state = { ...INITIAL_SESSION_STATE, notesUpdated: true, nudged: true }
+    expect(promptReminder(state, 250_000, lines, DEFAULT_PARAMS, tool)?.text).toBe(milestoneReminder(250_000, tool))
+  })
+  test('测试失败、腾不出空间、可以压缩或没到提醒线时不提醒标完成', () => {
+    const updated = { ...INITIAL_SESSION_STATE, notesUpdated: true }
+    const failing = { ...updated, work: { ...updated.work, testsFailing: true } }
+    expect(promptReminder(failing, 250_000, lines, DEFAULT_PARAMS, tool)).toBeUndefined()
+    // 测试失败时笔记还没更新，仍提醒记笔记，不提醒标完成。
+    const failingNoNotes = { ...failing, notesUpdated: false }
+    expect(promptReminder(failingNoNotes, 250_000, lines, DEFAULT_PARAMS, tool)?.log).toEqual({ event: 'reminder', action: 'nudge', reason: 'notes-not-updated', tokens: 250_000 })
+    expect(promptReminder({ ...updated, measuredAfterTokens: 200_000 }, 250_000, lines, DEFAULT_PARAMS, tool)).toBeUndefined()
+    const compactable = { ...updated, work: { ...updated.work, milestone: 'commit' } } as const
+    expect(promptReminder(compactable, 250_000, lines, DEFAULT_PARAMS, tool)).toBeUndefined()
+    expect(promptReminder(INITIAL_SESSION_STATE, 150_000, lines, DEFAULT_PARAMS, tool)).toBeUndefined()
+  })
+})
+
 describe('报告', () => {
   test('按事件和动作统计决策', () => {
     expect(
@@ -117,10 +184,11 @@ describe('报告', () => {
       state: { ...INITIAL_SESSION_STATE, compactions: 2 },
       lines: { allow: 200_000, ceiling: 967_000 },
       tokens: 120_000,
-      counts: { 'compacted:plugin': 2 },
+      counts: { 'compacted:plugin': 2, 'reminder:milestone': 3 },
     })
     expect(text).toContain('允许压缩线 200k，原生压缩点 967k')
     expect(text).toContain('插件压缩 2')
+    expect(text).toContain('提醒记笔记 0，提醒标完成 3')
     expect(text).toContain('任务完成 0')
     expect(text).toContain('还没有读数')
   })

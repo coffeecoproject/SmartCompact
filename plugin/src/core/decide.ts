@@ -1,4 +1,5 @@
 // 两个决策函数：一轮结束时要不要主动压缩；一轮进行中原生自动压缩来问时放不放行（只有原生压缩点能提前的平台用到，目前是 pi）。
+// 另有两个判断供 reminder.ts 用：要不要提醒记笔记、要不要提醒标完成。
 // 读不到用量时一律不干预，按原生行为来。
 
 import type { Lines } from './lines.ts'
@@ -50,6 +51,18 @@ export function shouldNudge(
 ): boolean {
   if (input.paused || input.notesUpdated || input.nudged || input.tokens === undefined) return false
   return input.tokens >= input.lines.allow * params.nudgeAtShare
+}
+
+/** 超过允许线、因为还没做完一件事在等时，提醒模型做完一步就标完成；上下文每涨 remindEveryTokens 才再提醒一次。 */
+export function shouldRemindMilestone(
+  decision: TurnEndDecision,
+  tokens: number,
+  remindedAtTokens: number | undefined,
+  params: Params,
+): boolean {
+  if (decision.action !== 'wait') return false
+  if (decision.reason !== 'changed-since-milestone' && decision.reason !== 'waiting-for-milestone') return false
+  return remindedAtTokens === undefined || tokens - remindedAtTokens >= params.remindEveryTokens
 }
 
 export function decideMidTurn(input: DecisionInput, params: Params): MidTurnDecision {

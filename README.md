@@ -16,7 +16,7 @@ Every request re-reads the whole context, so a long context makes every step exp
 - **Compact at a good moment.** Once the context passes the **allow line** (200k tokens by default), it compacts when a turn ends, if a piece of work has been finished since the last compaction (a commit, tests passing, a task completed) and no file has been changed since.
 - **Never in the middle of work.** It only decides when a turn ends, never mid-turn, and it waits while tests or the build are failing or errors keep repeating.
 - **No limit of its own.** If no piece of work gets finished, the agent is usually deep in one large task, which is when a large context pays off. SmartCompact leaves it alone, and the platform's native compaction applies as it would without the plugin.
-- **A progress ledger bridges the gap.** Files changed, the latest commit and test result, and decisions the agent recorded are handed back to the model after compaction.
+- **A progress ledger bridges the gap.** Files changed, the latest commit and test result, and the user requirements and decisions the agent recorded are handed back to the model after compaction.
 - **No pointless compactions.** It skips compaction when it would not free enough space.
 
 ## Results
@@ -75,14 +75,14 @@ Codex hooks cannot postpone a compaction in the middle of a turn, so SmartCompac
 
 ## Seeing what it did
 
-- Claude Code and Pi: `/smartcompact` (or `/smartcompact report`) shows the allow line, the native compaction point, the finished-work signals it saw and a cost estimate; `/smartcompact pause` and `resume` turn it off and on for the session. The model can also call a `checkpoint` tool to record decisions, which come back with the ledger after compaction.
+- Claude Code and Pi: `/smartcompact` (or `/smartcompact report`) shows the allow line, the native compaction point, the finished-work signals it saw and a cost estimate; `/smartcompact pause` and `resume` turn it off and on for the session. The model can also call a `checkpoint` tool to record the user's requirements and decisions, which come back with the ledger after compaction.
 - Codex: `node ~/.codex/plugins/cache/smartcompact/smartcompact/<version>/adapters/codex/report.ts <session ID>` (Node.js 22.18+); records are kept in `~/.codex/smartcompact/`.
 
 ## FAQ
 
 **How does it know a piece of work is finished?** From the commands the agent runs. Any finished piece of work since the last compaction counts, not only one in the current turn: the end of a turn is already a pause, so waiting for the next commit would mostly just cost more. Once files are changed again after it, the next piece of work has started, and SmartCompact waits for that one to finish. A commit counts if `git commit` actually ran and the tool call did not fail. A test command piped into something else (`| tail`) without `pipefail` does not count, since its exit code cannot be trusted.
 
-**Will the model forget things after compaction?** Sometimes, for details mentioned in passing. The ledger only records files, commits, tests and decisions the model chose to record. Details the user mentions in passing are kept by asking the compaction summary to keep every specific fact the user stated. On Pi this clearly reduced losses, but it is not a guarantee.
+**Will the model forget things after compaction?** Sometimes, for details mentioned in passing. The ledger only records files, commits, tests and the requirements and decisions the model chose to record; user requirements have their own section, so later notes do not push them out, and only the oldest are dropped once there are more than 30. Details the user mentions in passing are kept by asking the compaction summary to keep every specific fact the user stated. On Pi this clearly reduced losses, but it is not a guarantee.
 
 **Does it change Claude Code's own settings?** No. Native auto-compaction stays where it is (close to 1M). Versions up to 0.1.2 moved it to about 260k by setting `CLAUDE_CODE_AUTO_COMPACT_WINDOW` in the session (which child processes inherited) and also compacted there without a finished piece of work. 0.1.3 removed both: a long task is no longer cut off at a fixed size. A session opened on 0.1.2 or earlier keeps the old setting until you start a new one.
 

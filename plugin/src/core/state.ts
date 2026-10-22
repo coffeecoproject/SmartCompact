@@ -1,6 +1,6 @@
 // 会话状态与决策日志的数据格式。读写由适配层负责，core 只定义格式。
 
-import { EMPTY_LEDGER, type Ledger } from './ledger.ts'
+import { type CheckpointInput, EMPTY_LEDGER, type Ledger } from './ledger.ts'
 import { afterCompaction, applySignal, INITIAL_WORK_STATE, milestoneOf, type MilestoneSource, type Signal, type WorkState } from './signals.ts'
 import { EMPTY_TALLY, type Prices, recordCompaction, recordSample, type UsageTally } from './usage.ts'
 
@@ -15,8 +15,10 @@ export type SessionState = {
   paused: boolean
   /** 自上次压缩以来，模型是否通过 checkpoint 更新过笔记 */
   notesUpdated: boolean
-  /** 自上次压缩以来，是否提醒过模型更新笔记 */
+  /** 自上次压缩以来，是否提醒过模型（记笔记或标完成）；提醒过就不再提醒记笔记 */
   nudged: boolean
+  /** 本周期最近一次提醒模型标完成时的用量 */
+  remindedAtTokens?: number
   /** 各种信号出现过的次数，用于确认识别是否生效 */
   seen: SignalsSeen
   usage: UsageTally
@@ -102,6 +104,7 @@ export function withCompaction(state: SessionState, before: number, summary: num
     compactions: state.compactions + 1,
     notesUpdated: false,
     nudged: false,
+    remindedAtTokens: undefined,
     usage: attributed ? recordCompaction(state.usage, before, summary) : state.usage,
   }
 }
@@ -125,11 +128,21 @@ export function cycleReads(state: SessionState): Pick<DecisionLogEntry, 'reads' 
   return state.reads ? { reads: state.reads.reads, rereads: state.reads.rereads } : {}
 }
 
+/** checkpoint 的日志：有没有标完成、用户要求有几条。 */
+export function checkpointLog(input: CheckpointInput, ledger: Ledger): Omit<DecisionLogEntry, 'at' | 'session'> {
+  const requirements = ledger.notes.requirements?.length ?? 0
+  return {
+    event: 'checkpoint',
+    action: input.milestone ? 'milestone' : 'note',
+    ...(requirements ? { requirements } : {}),
+  }
+}
+
 export type DecisionLogEntry = {
   at: string
   /** 会话 ID，报告据此只统计当前会话 */
   session?: string
-  event: 'setup' | 'turn-end' | 'mid-turn' | 'compacted' | 'checkpoint' | 'error'
+  event: 'setup' | 'turn-end' | 'mid-turn' | 'compacted' | 'checkpoint' | 'reminder' | 'error'
   action?: string
   reason?: string
   tokens?: number
@@ -140,6 +153,8 @@ export type DecisionLogEntry = {
   /** 压缩时：上次压缩以来读文件的次数，以及其中重读压缩前看过的文件的次数 */
   reads?: number
   rereads?: number
+  /** checkpoint 之后用户要求的条数 */
+  requirements?: number
   trigger?: string
   detail?: string
 }

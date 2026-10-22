@@ -10,7 +10,7 @@ import {
   recordTest,
   renderLedger,
 } from '../src/core/ledger.ts'
-import { cycleReads, expectedAfterTokens, INITIAL_SESSION_STATE, parseState, withCompaction, withRead } from '../src/core/state.ts'
+import { checkpointLog, cycleReads, expectedAfterTokens, INITIAL_SESSION_STATE, parseState, withCompaction, withRead } from '../src/core/state.ts'
 
 describe('checkpoint 输入校验', () => {
   test('接受合法输入', () => {
@@ -25,6 +25,8 @@ describe('checkpoint 输入校验', () => {
     expect(parseCheckpoint({ milestone: true }).ok).toBe(false)
     expect(parseCheckpoint({ goal: '  ' }).ok).toBe(false)
     expect(parseCheckpoint({ decisions: 'a' }).ok).toBe(false)
+    expect(parseCheckpoint({ requirements: ['a', ' '] }).ok).toBe(false)
+    expect(parseCheckpoint({ goal: 'A', milestone: 'yes' }).ok).toBe(false)
     expect(parseCheckpoint(null).ok).toBe(false)
   })
 })
@@ -33,7 +35,38 @@ describe('进度笔记', () => {
   test('checkpoint 覆盖目标和下一步，决定去重追加', () => {
     const first = applyCheckpoint(EMPTY_LEDGER, { goal: 'A', decisions: ['d1'], next: 'n1' })
     const second = applyCheckpoint(first, { decisions: ['d1', 'd2'], next: 'n2' })
-    expect(second.notes).toEqual({ goal: 'A', decisions: ['d1', 'd2'], next: 'n2', current: undefined })
+    expect(second.notes).toEqual({ goal: 'A', requirements: [], decisions: ['d1', 'd2'], next: 'n2', current: undefined })
+  })
+
+  test('用户要求去重追加，不随决定一起被挤掉；旧版本存下的笔记没有这一项也能用', () => {
+    const old = { ...EMPTY_LEDGER, notes: { decisions: ['d0'] } }
+    let ledger = applyCheckpoint(old, { requirements: ['不要改 legacy/ 目录', '工单号 OPS-4471'] })
+    ledger = applyCheckpoint(ledger, { requirements: ['工单号 OPS-4471'], decisions: Array.from({ length: 40 }, (_, i) => `d${i + 1}`) })
+    expect(ledger.notes.requirements).toEqual(['不要改 legacy/ 目录', '工单号 OPS-4471'])
+    expect(ledger.notes.decisions).toHaveLength(30)
+    expect(ledger.notes.decisions[0]).toBe('d11')
+  })
+
+  test('checkpoint 日志记下用户要求条数', () => {
+    const ledger = applyCheckpoint(EMPTY_LEDGER, { requirements: ['r0', 'r1'] })
+    expect(checkpointLog({ requirements: ['r1'], milestone: true }, ledger)).toEqual({ event: 'checkpoint', action: 'milestone', requirements: 2 })
+  })
+
+  test('用户要求只追加，超过 30 条才丢最旧的', () => {
+    const ledger = applyCheckpoint(EMPTY_LEDGER, { requirements: Array.from({ length: 35 }, (_, i) => `r${i}`) })
+    expect(ledger.notes.requirements).toHaveLength(30)
+    expect(ledger.notes.requirements?.[0]).toBe('r5')
+  })
+
+  test('再记一次的要求挪到最后，满了也不先丢它', () => {
+    let ledger = applyCheckpoint(EMPTY_LEDGER, { requirements: Array.from({ length: 30 }, (_, i) => `r${i}`) })
+    ledger = applyCheckpoint(ledger, { requirements: ['r0', 'r0'] })
+    expect(ledger.notes.requirements).toHaveLength(30)
+    expect(ledger.notes.requirements?.at(-1)).toBe('r0')
+    ledger = applyCheckpoint(ledger, { requirements: ['new'] })
+    expect(ledger.notes.requirements).toContain('r0')
+    expect(ledger.notes.requirements).not.toContain('r1')
+    expect(ledger.notes.requirements?.at(-1)).toBe('new')
   })
 
   test('改过的文件去重，最近的排在最后', () => {
@@ -66,6 +99,23 @@ describe('进度笔记', () => {
     expect(text).not.toContain('d0-')
     expect(text).toMatch(/earlier decisions omitted/)
     expect(text).not.toContain('…(truncated)')
+  })
+
+  test('用户要求排在目标后面，超长时最后才丢', () => {
+    let ledger = applyCheckpoint(EMPTY_LEDGER, {
+      goal: '迁移登录模块',
+      requirements: ['不要改 legacy/ 目录', `客户 ${'c'.repeat(200)}`],
+      decisions: Array.from({ length: 10 }, (_, i) => `d${i}-${'x'.repeat(200)}`),
+    })
+    ledger = Array.from({ length: 10 }, (_, i) => `src/m${i}/${'f'.repeat(100)}.ts`).reduce(recordFileChanged, ledger)
+    const text = renderLedger(ledger, 900)
+    expect(text.indexOf('## Goal')).toBeLessThan(text.indexOf('## User requirements'))
+    expect(text).toContain('不要改 legacy/ 目录')
+    expect(text).toContain('客户 ')
+    expect(text).not.toContain('d9-')
+    expect(text).toMatch(/earlier files omitted/)
+    const tight = renderLedger(ledger, 300)
+    expect(tight).toMatch(/earlier requirements omitted/)
   })
 
   test('决定丢完仍超长时丢最早改过的文件', () => {

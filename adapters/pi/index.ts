@@ -6,12 +6,21 @@
 import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent'
 import { SettingsManager } from '@earendil-works/pi-coding-agent'
 import { Type } from 'typebox'
-import { decideAtTurnEnd, decideMidTurn, shouldNudge } from '../../plugin/src/core/decide.ts'
-import { applyCheckpoint, COMPACT_INSTRUCTIONS, parseCheckpoint, renderLedger } from '../../plugin/src/core/ledger.ts'
+import { decideAtTurnEnd, decideMidTurn } from '../../plugin/src/core/decide.ts'
+import {
+  applyCheckpoint,
+  CHECKPOINT_DESCRIPTION,
+  CHECKPOINT_INPUT_SCHEMA,
+  COMPACT_INSTRUCTIONS,
+  parseCheckpoint,
+  renderLedger,
+} from '../../plugin/src/core/ledger.ts'
 import type { Lines } from '../../plugin/src/core/lines.ts'
 import { resolveParams } from '../../plugin/src/core/params.ts'
+import { promptReminder } from '../../plugin/src/core/reminder.ts'
 import { countDecisions, renderReport } from '../../plugin/src/core/report.ts'
 import {
+  checkpointLog,
   cycleReads,
   type DecisionLogEntry,
   expectedAfterTokens,
@@ -30,16 +39,14 @@ import { recognizePi } from './recognize.ts'
 const STATE_ENTRY = 'smartcompact-state'
 const LOG_ENTRY = 'smartcompact-log'
 const LEDGER_MESSAGE = 'smartcompact-ledger'
-const NUDGE_MESSAGE = 'smartcompact-nudge'
+const REMINDER_MESSAGE = 'smartcompact-reminder'
 const CHECKPOINT_TOOL = 'smartcompact_checkpoint'
 /** pi 内置的默认 reserveTokens，即不配置时原生压缩点离满窗的距离 */
 const PI_DEFAULT_RESERVE = 16_384
 /** 压缩后除了保留的最近内容，还有系统提示、工具和摘要，粗估这么多 */
 const PI_AFTER_OVERHEAD = 10_000
 
-const nudgeText = (tokens: number): string =>
-  `SmartCompact: the context is at about ${Math.round(tokens / 1000)}k tokens and will be compacted at the next finished piece of work. ` +
-  `If decisions or progress are not yet recorded, call ${CHECKPOINT_TOOL} briefly. If the user is waiting for an answer, answer first.`
+const field = CHECKPOINT_INPUT_SCHEMA.properties
 
 export default function smartCompact(pi: ExtensionAPI) {
   pi.registerFlag('smartcompact-allow-line', { description: 'SmartCompact 允许压缩线（token）', type: 'string' })
@@ -125,24 +132,22 @@ export default function smartCompact(pi: ExtensionAPI) {
   pi.registerTool({
     name: CHECKPOINT_TOOL,
     label: 'Checkpoint',
-    description:
-      'Record a short progress note that survives context compaction: the goal, decisions made, where the work stands, and what is next. ' +
-      'Call it after finishing a piece of work (set milestone: true) or after an important decision. Keep it brief; do not call it for trivial steps.',
+    description: CHECKPOINT_DESCRIPTION,
     parameters: Type.Object({
-      goal: Type.Optional(Type.String({ description: 'The overall goal of the current work.' })),
-      decisions: Type.Optional(Type.Array(Type.String(), { description: 'Decisions made since the last checkpoint.' })),
-      next: Type.Optional(Type.String({ description: 'What to do next.' })),
-      current: Type.Optional(Type.String({ description: 'Where the work stands right now.' })),
-      milestone: Type.Optional(Type.Boolean({ description: 'True when a piece of work was just finished.' })),
+      goal: Type.Optional(Type.String({ description: field.goal.description })),
+      requirements: Type.Optional(Type.Array(Type.String(), { description: field.requirements.description })),
+      decisions: Type.Optional(Type.Array(Type.String(), { description: field.decisions.description })),
+      next: Type.Optional(Type.String({ description: field.next.description })),
+      current: Type.Optional(Type.String({ description: field.current.description })),
+      milestone: Type.Optional(Type.Boolean({ description: field.milestone.description })),
     }),
     async execute(_toolCallId, input) {
       const parsed = parseCheckpoint(input)
       if (!parsed.ok) return { content: [{ type: 'text', text: `Not recorded: ${parsed.error}` }], details: {} }
-      state = withSignals({ ...state, ledger: applyCheckpoint(state.ledger, parsed.value), notesUpdated: true }, [
-        { kind: 'checkpoint', milestone: parsed.value.milestone === true },
-      ])
+      const ledger = applyCheckpoint(state.ledger, parsed.value)
+      state = withSignals({ ...state, ledger, notesUpdated: true }, [{ kind: 'checkpoint', milestone: parsed.value.milestone === true }])
       persist()
-      log({ event: 'checkpoint', action: parsed.value.milestone ? 'milestone' : 'note' })
+      log(checkpointLog(parsed.value, ledger))
       return { content: [{ type: 'text', text: 'Recorded. Continue with the work.' }], details: {} }
     },
   })
@@ -172,10 +177,12 @@ export default function smartCompact(pi: ExtensionAPI) {
 
   pi.on('before_agent_start', async (_event, ctx) => {
     const current = lines(ctx)
-    const tokens = tokensOf(ctx)
-    if (!current || !shouldNudge({ tokens, lines: current, notesUpdated: state.notesUpdated, nudged: state.nudged, paused: state.paused }, params(ctx))) return
-    state = { ...state, nudged: true }
-    return { message: { customType: NUDGE_MESSAGE, content: nudgeText(tokens ?? 0), display: false } }
+    const reminder = current && promptReminder(state, tokensOf(ctx), current, params(ctx), CHECKPOINT_TOOL)
+    if (!reminder) return
+    state = reminder.state
+    persist()
+    log(reminder.log)
+    return { message: { customType: REMINDER_MESSAGE, content: reminder.text, display: false } }
   })
 
   // agent_settled：pi 不会再自动继续，此时压缩不会打断工作。

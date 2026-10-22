@@ -3,13 +3,23 @@
 // 每个会拦截的 hook 都带 .catch：插件出错时退回原生行为。
 
 import type { EngineInterface, Register } from 'claude-code'
-import { decideAtTurnEnd, shouldNudge } from '../src/core/decide.ts'
-import { applyCheckpoint, CHECKPOINT_INPUT_SCHEMA, COMPACT_INSTRUCTIONS, isLedgerText, parseCheckpoint, renderLedger } from '../src/core/ledger.ts'
+import { decideAtTurnEnd } from '../src/core/decide.ts'
+import {
+  applyCheckpoint,
+  CHECKPOINT_DESCRIPTION,
+  CHECKPOINT_INPUT_SCHEMA,
+  COMPACT_INSTRUCTIONS,
+  isLedgerText,
+  parseCheckpoint,
+  renderLedger,
+} from '../src/core/ledger.ts'
 import type { Lines } from '../src/core/lines.ts'
 import { type Params, resolveParams } from '../src/core/params.ts'
+import { promptReminder } from '../src/core/reminder.ts'
 import { countDecisions, renderReport } from '../src/core/report.ts'
 import { pricesFor } from '../src/core/usage.ts'
 import {
+  checkpointLog,
   cycleReads,
   type DecisionLogEntry,
   expectedAfterTokens,
@@ -31,14 +41,6 @@ const LOG_KEY = 'log'
 const LOG_LIMIT = 1_000
 const COMPACT_DELAY_MS = 500
 const CLAUDE_PRICES = pricesFor('anthropic')
-
-const CHECKPOINT_DESCRIPTION =
-  'Record a short progress note that survives context compaction: the goal, decisions made, where the work stands, and what is next. ' +
-  'Call it after finishing a piece of work (set milestone: true) or after an important decision. Keep it brief; do not call it for trivial steps.'
-
-const nudgeText = (tokens: number): string =>
-  `SmartCompact: the context is at about ${Math.round(tokens / 1000)}k tokens and will be compacted at the next finished piece of work. ` +
-  `If decisions or progress are not yet recorded, call ${CHECKPOINT_TOOL} briefly. If the user is waiting for an answer, answer first.`
 
 let params: Params = resolveParams()
 /** 一轮结束后排队等待执行的压缩；用户发新消息时作废。 */
@@ -174,11 +176,10 @@ export const register: Register = (on, options) => {
     const parsed = parseCheckpoint(e)
     if (!parsed.ok) return { result: `Not recorded: ${parsed.error}` }
     const state = await loadSession($)
-    const updated = withSignals({ ...state, ledger: applyCheckpoint(state.ledger, parsed.value), notesUpdated: true }, [
-      { kind: 'checkpoint', milestone: parsed.value.milestone === true },
-    ])
+    const ledger = applyCheckpoint(state.ledger, parsed.value)
+    const updated = withSignals({ ...state, ledger, notesUpdated: true }, [{ kind: 'checkpoint', milestone: parsed.value.milestone === true }])
     await saveSession($, updated)
-    await log($, { event: 'checkpoint', action: parsed.value.milestone ? 'milestone' : 'note' })
+    await log($, checkpointLog(parsed.value, ledger))
     return { result: 'Recorded. Continue with the work.' }
   }).catch(() => ({ result: 'Not recorded: SmartCompact failed to save the note.' }))
 
@@ -220,11 +221,11 @@ export const register: Register = (on, options) => {
       ledgerToAttach = null
     }
     const lines = await loadLines($)
-    const state = await loadSession($)
-    const tokens = (await $.session.usage()).context.tokens
-    if (lines && shouldNudge({ tokens, lines, notesUpdated: state.notesUpdated, nudged: state.nudged, paused: state.paused }, params)) {
-      context.push(nudgeText(tokens ?? 0))
-      await saveSession($, { ...state, nudged: true })
+    const reminder = lines ? promptReminder(await loadSession($), (await $.session.usage()).context.tokens, lines, params, CHECKPOINT_TOOL) : undefined
+    if (reminder) {
+      context.push(reminder.text)
+      await saveSession($, reminder.state)
+      await log($, reminder.log)
     }
     return next(context.length ? { ...e, context } : e)
   }).catch(($, e, next) => next(e))
