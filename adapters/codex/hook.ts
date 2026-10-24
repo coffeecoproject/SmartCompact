@@ -11,13 +11,14 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { classifyCommand } from '../../plugin/src/core/commands.ts'
 import { decideAtTurnEnd } from '../../plugin/src/core/decide.ts'
-import { recordFileChanged, renderLedger } from '../../plugin/src/core/ledger.ts'
+import { recordFileChanged, recordLastReply, renderLedger } from '../../plugin/src/core/ledger.ts'
 import type { Lines } from '../../plugin/src/core/lines.ts'
 import { resolveParams } from '../../plugin/src/core/params.ts'
+import { planCompaction } from '../../plugin/src/core/pending.ts'
 import type { Signal } from '../../plugin/src/core/signals.ts'
 import { expectedAfterTokens, growthSinceMilestone, withCompaction, withSample, withSignals } from '../../plugin/src/core/state.ts'
 import { pricesFor } from '../../plugin/src/core/usage.ts'
-import { MAX_WAIT_MS } from './compactor.ts'
+import { compactorAlive } from './compactor.ts'
 import { readRollout } from './rollout.ts'
 import { appendLog, type CodexSession, loadSession, nativeAutoCompactLimit, saveSession } from './store.ts'
 
@@ -26,12 +27,14 @@ const CODEX_AFTER_TOKENS = 25_000
 /** 摘要长度粗估，用于压缩开销 */
 const CODEX_SUMMARY_TOKENS = 3_000
 
-const number = (name: string): number | undefined => Number(process.env[name]) || undefined
+/** 没设置时用默认值；0 也是合法的设置。 */
+const number = (name: string): number | undefined => (process.env[name]?.trim() ? Number(process.env[name]) : undefined)
 
 export const params = () =>
   resolveParams({
     allowLineTokens: number('SMARTCOMPACT_ALLOW_LINE'),
     minFreedTokens: number('SMARTCOMPACT_MIN_FREED'),
+    compactIdleSeconds: number('SMARTCOMPACT_IDLE_SECONDS'),
     defaultAfterTokens: CODEX_AFTER_TOKENS,
   })
 
@@ -46,6 +49,8 @@ type Payload = {
   source?: string
   trigger?: string
   model?: string
+  /** Stop 带的这一轮最后一条回复 */
+  last_assistant_message?: string | null
 }
 
 const contextOutput = (event: string, text: string) =>
@@ -80,6 +85,7 @@ function absorbRollout(session: CodexSession, payload: Payload): { session: Code
 function onStop(sessionId: string, payload: Payload): void {
   const absorbed = absorbRollout(loadSession(sessionId), payload)
   let session = absorbed.session
+  session = { ...session, state: { ...session.state, ledger: recordLastReply(session.state.ledger, payload.last_assistant_message ?? '') } }
   const lines = linesFor(absorbed.window)
   const current = params()
   const decision = decideAtTurnEnd(
@@ -95,14 +101,14 @@ function onStop(sessionId: string, payload: Payload): void {
   const tokens = session.state.usage.lastTokens
   const sinceMilestoneTokens = decision.action === 'compact' ? growthSinceMilestone(session.state.work, tokens) : undefined
   if (decision.action !== 'none') appendLog(sessionId, { event: 'turn-end', action: decision.action, reason: decision.reason, tokens, sinceMilestoneTokens })
-  session = { ...session, compactWanted: decision.action === 'compact' }
-  // 后台进程意外退出时请求会一直挂着；超过它的最长等待时间就当作失效，允许重新发起。
-  const pending = session.compactRequestedAt !== undefined && Date.now() - session.compactRequestedAt < MAX_WAIT_MS + 60_000
-  if (decision.action === 'compact' && !pending) {
+  // 要压缩就等用户空闲一会儿再压：还在讨论时不打断。判断变了就撤销还在等的那次。
+  const alive = compactorAlive(session, Date.now())
+  session = { ...session, compactPending: decision.action === 'compact' ? planCompaction(sessionId, session.state, Date.now(), current) : undefined }
+  if (decision.action === 'compact' && !alive) {
     // 一轮还没结束时发起压缩会中断这一轮，所以交给后台进程等会话空闲后再发。
     const compactor = join(dirname(fileURLToPath(import.meta.url)), 'compactor.ts')
     spawn(process.execPath, [compactor, sessionId], { detached: true, stdio: 'ignore', env: process.env }).unref()
-    session = { ...session, compactRequestedAt: Date.now() }
+    session = { ...session, compactorStartedAt: Date.now() }
   }
   saveSession(sessionId, session)
 }
@@ -115,7 +121,16 @@ function onPostCompact(sessionId: string, payload: Payload): void {
   // 插件发起的压缩计入节省；Codex 原生的自动压缩和用户的 /compact 没有插件时也会发生。
   const state = withCompaction(session.state, before, CODEX_SUMMARY_TOKENS, ours)
   appendLog(sessionId, { event: 'compacted', trigger: ours ? 'plugin' : payload.trigger === 'auto' ? 'auto' : 'manual', tokensBefore: before })
-  saveSession(sessionId, { ...session, state, compactRequestedAt: undefined, compactWanted: false, ledgerPending: true })
+  // 还在等的那次不在这里撤销：后台进程到点核对时会发现已经压缩过。
+  saveSession(sessionId, { ...session, state, compactRequestedAt: undefined, ledgerPending: true })
+}
+
+/** 用户发了新消息：还在讨论，撤销等着的压缩，下一轮结束时重新判断。 */
+function onUserPrompt(sessionId: string): void {
+  const session = loadSession(sessionId)
+  if (!session.compactPending) return
+  saveSession(sessionId, { ...session, compactPending: undefined })
+  appendLog(sessionId, { event: 'compacted', action: 'cancelled', reason: 'new-turn', trigger: 'plugin' })
 }
 
 /** 补回进度笔记：压缩后第一次有机会注入时输出一次。 */
@@ -135,7 +150,10 @@ function main(): void {
     if (event === 'Stop') onStop(sessionId, payload)
     else if (event === 'PostCompact') onPostCompact(sessionId, payload)
     else if (event === 'SessionStart' && payload.source === 'compact') attachLedger(sessionId, 'SessionStart')
-    else if (event === 'UserPromptSubmit') attachLedger(sessionId, 'UserPromptSubmit')
+    else if (event === 'UserPromptSubmit') {
+      onUserPrompt(sessionId)
+      attachLedger(sessionId, 'UserPromptSubmit')
+    }
   } catch (error) {
     appendLog(sessionId, { event: 'error', reason: event, detail: String(error) })
   }

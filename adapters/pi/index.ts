@@ -13,10 +13,12 @@ import {
   CHECKPOINT_INPUT_SCHEMA,
   COMPACT_INSTRUCTIONS,
   parseCheckpoint,
+  recordLastReply,
   renderLedger,
 } from '../../plugin/src/core/ledger.ts'
 import type { Lines } from '../../plugin/src/core/lines.ts'
 import { resolveParams } from '../../plugin/src/core/params.ts'
+import { planCompaction, staleCompaction } from '../../plugin/src/core/pending.ts'
 import { promptReminder } from '../../plugin/src/core/reminder.ts'
 import { countDecisions, renderReport } from '../../plugin/src/core/report.ts'
 import {
@@ -48,14 +50,22 @@ const PI_AFTER_OVERHEAD = 10_000
 
 const field = CHECKPOINT_INPUT_SCHEMA.properties
 
+/** 没设置时用默认值；0 也是合法的设置。 */
+const flagNumber = (value: unknown): number | undefined => (typeof value === 'string' && value.trim() ? Number(value) : undefined)
+
 export default function smartCompact(pi: ExtensionAPI) {
   pi.registerFlag('smartcompact-allow-line', { description: 'SmartCompact 允许压缩线（token）', type: 'string' })
   pi.registerFlag('smartcompact-min-freed', { description: 'SmartCompact 最少腾出空间（token）', type: 'string' })
+  pi.registerFlag('smartcompact-idle-seconds', { description: 'SmartCompact 决定压缩后等用户空闲多少秒', type: 'string' })
 
   let state: SessionState = INITIAL_SESSION_STATE
   let saved = ''
   /** 插件自己发起的压缩在 pi 里同样是 manual，据此和用户的 /compact 区分。 */
   let ours = false
+  /** 这次运行给用户的最后一段文字；运行正常结束时记进笔记，压缩后原样带回。 */
+  let lastReply = ''
+  /** 一轮结束后等用户空闲再执行的压缩；用户发新消息、换会话或退出时作废，到点时再核对会话现状。 */
+  let idleCompaction: ReturnType<typeof setTimeout> | undefined
   /** 当前模型的 reserveTokens 和 keepRecentTokens；读设置文件有开销，按会话和模型缓存。 */
   let compaction: { reserve: number; keepRecent: number } | undefined
 
@@ -71,8 +81,9 @@ export default function smartCompact(pi: ExtensionAPI) {
   // pi 的基础占用比 Claude 小得多：压缩后的大小按 pi 保留的最近内容估算，而不是用 core 的默认值。
   const params = (ctx: ExtensionContext) =>
     resolveParams({
-      allowLineTokens: Number(pi.getFlag('smartcompact-allow-line')) || undefined,
-      minFreedTokens: Number(pi.getFlag('smartcompact-min-freed')) || undefined,
+      allowLineTokens: flagNumber(pi.getFlag('smartcompact-allow-line')),
+      minFreedTokens: flagNumber(pi.getFlag('smartcompact-min-freed')),
+      compactIdleSeconds: flagNumber(pi.getFlag('smartcompact-idle-seconds')),
       defaultAfterTokens: compactionSettings(ctx).keepRecent + PI_AFTER_OVERHEAD,
     })
 
@@ -104,6 +115,14 @@ export default function smartCompact(pi: ExtensionAPI) {
 
   const log = (entry: Omit<DecisionLogEntry, 'at' | 'session'>) => pi.appendEntry(LOG_ENTRY, { at: new Date().toISOString(), ...entry })
 
+  /** 撤销还在等用户空闲的压缩；返回是否真的撤销了。 */
+  const cancelIdleCompaction = (): boolean => {
+    if (!idleCompaction) return false
+    clearTimeout(idleCompaction)
+    idleCompaction = undefined
+    return true
+  }
+
   const report = (ctx: ExtensionContext): string => {
     const current = lines(ctx)
     if (!current) return 'SmartCompact 尚未读到上下文用量。'
@@ -123,6 +142,7 @@ export default function smartCompact(pi: ExtensionAPI) {
     saved = JSON.stringify(state)
     ours = false
     compaction = undefined
+    cancelIdleCompaction()
   })
 
   pi.on('model_select', async () => {
@@ -176,6 +196,8 @@ export default function smartCompact(pi: ExtensionAPI) {
   })
 
   pi.on('before_agent_start', async (_event, ctx) => {
+    // 等待期间来了新消息，说明还在进行，这次不压，等下一次停顿。
+    if (cancelIdleCompaction()) log({ event: 'compacted', action: 'cancelled', reason: 'new-turn', trigger: 'plugin' })
     const current = lines(ctx)
     const reminder = current && promptReminder(state, tokensOf(ctx), current, params(ctx), CHECKPOINT_TOOL)
     if (!reminder) return
@@ -185,10 +207,23 @@ export default function smartCompact(pi: ExtensionAPI) {
     return { message: { customType: REMINDER_MESSAGE, content: reminder.text, display: false } }
   })
 
-  // agent_settled：pi 不会再自动继续，此时压缩不会打断工作。
-  pi.on('agent_settled', async (_event, ctx) => {
+  pi.on('agent_end', async event => {
+    const reply = event.messages.findLast(message => message.role === 'assistant')
+    lastReply =
+      reply && 'content' in reply && Array.isArray(reply.content)
+        ? reply.content.flatMap(block => (block.type === 'text' ? [block.text] : [])).join('\n')
+        : ''
+  })
+
+  // agent_settled：pi 不会再自动继续，此时压缩不会打断工作。被用户打断的运行不压缩，也不记回复。
+  pi.on('agent_settled', async (event, ctx) => {
+    if (event.aborted) return
+    state = { ...state, ledger: recordLastReply(state.ledger, lastReply) }
     const current = lines(ctx)
-    if (!current) return
+    if (!current) {
+      persist()
+      return
+    }
     const tokens = sample(ctx, current)
     persist()
     const decision = decideAtTurnEnd(
@@ -197,15 +232,35 @@ export default function smartCompact(pi: ExtensionAPI) {
     )
     const sinceMilestoneTokens = decision.action === 'compact' ? growthSinceMilestone(state.work, tokens) : undefined
     if (decision.action !== 'none') log({ event: 'turn-end', action: decision.action, reason: decision.reason, tokens, sinceMilestoneTokens })
-    if (decision.action !== 'compact' || !ctx.isIdle() || ctx.hasPendingMessages()) return
-    ours = true
-    ctx.compact({
-      customInstructions: COMPACT_INSTRUCTIONS,
-      onError: error => {
-        ours = false
-        log({ event: 'compacted', action: 'failed', trigger: 'plugin', detail: error.message })
-      },
-    })
+    if (decision.action !== 'compact') return
+    // 等用户空闲一会儿再压：还在讨论时不打断，用户也不用等压缩完才得到回复。
+    cancelIdleCompaction()
+    const pending = planCompaction(ctx.sessionManager.getSessionId(), state, Date.now(), params(ctx))
+    idleCompaction = setTimeout(() => {
+      idleCompaction = undefined
+      // 新的运行会先经过 before_agent_start 撤销；到点还不空闲的是 pi 自己在重试、恢复或处理排队的消息，这次不压，下一次停顿时重新判断。
+      // 等待期间用户可能自己 /compact、原生压缩过或暂停了插件，这些也都不经过 before_agent_start。
+      const stale = !ctx.isIdle() || ctx.hasPendingMessages() ? 'busy' : staleCompaction(pending, state, ctx.sessionManager.getSessionId())
+      if (stale) {
+        log({ event: 'compacted', action: 'skipped', reason: stale, trigger: 'plugin' })
+        return
+      }
+      ours = true
+      ctx.compact({
+        customInstructions: COMPACT_INSTRUCTIONS,
+        onError: error => {
+          ours = false
+          log({ event: 'compacted', action: 'failed', trigger: 'plugin', detail: error.message })
+        },
+      })
+    }, pending.notBefore - Date.now())
+    // 等待中的压缩不拦着 pi 退出（比如 -p 模式跑完就该结束）。
+    idleCompaction.unref?.()
+  })
+
+  // 计时器拿着旧会话的 ctx，换会话或退出时必须清掉。
+  pi.on('session_shutdown', async () => {
+    cancelIdleCompaction()
   })
 
   pi.on('session_before_compact', async (event, ctx) => {

@@ -3,6 +3,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import type { PendingCompaction } from '../../plugin/src/core/pending.ts'
 import { INITIAL_SESSION_STATE, parseState, type DecisionLogEntry, type SessionState } from '../../plugin/src/core/state.ts'
 
 export const codexHome = (): string => process.env.CODEX_HOME || join(homedir(), '.codex')
@@ -14,10 +15,17 @@ export type CodexSession = {
   rolloutOffset: number
   /** 压缩后还没补回进度笔记 */
   ledgerPending: boolean
-  /** 插件请求压缩的时间（毫秒）；还没看到压缩发生时有值 */
+  /** 最近一轮结束时决定的、还在等用户空闲的压缩；判断变了或用户发了新消息就清掉 */
+  compactPending?: PendingCompaction
+  /** 后台压缩进程启动的时间（毫秒）；进程退出时清掉 */
+  compactorStartedAt?: number
+  /** 后台进程真正发起压缩的时间（毫秒）；看到压缩发生时清掉，据此认出插件发起的压缩 */
   compactRequestedAt?: number
-  /** 最近一轮结束时的判断是否仍是"应该压缩"；后台进程发起压缩前据此再确认一次 */
-  compactWanted: boolean
+}
+
+const isPending = (value: unknown): value is PendingCompaction => {
+  const pending = value as Partial<PendingCompaction> | undefined
+  return typeof pending?.session === 'string' && typeof pending.compactions === 'number' && typeof pending.notBefore === 'number'
 }
 
 const sessionFile = (sessionId: string): string => join(dataDir(), 'sessions', `${sessionId}.json`)
@@ -29,11 +37,12 @@ export function loadSession(sessionId: string): CodexSession {
       state: parseState(raw.state),
       rolloutOffset: typeof raw.rolloutOffset === 'number' ? raw.rolloutOffset : 0,
       ledgerPending: raw.ledgerPending === true,
+      compactPending: isPending(raw.compactPending) ? raw.compactPending : undefined,
+      compactorStartedAt: typeof raw.compactorStartedAt === 'number' ? raw.compactorStartedAt : undefined,
       compactRequestedAt: typeof raw.compactRequestedAt === 'number' ? raw.compactRequestedAt : undefined,
-      compactWanted: raw.compactWanted === true,
     }
   } catch {
-    return { state: INITIAL_SESSION_STATE, rolloutOffset: 0, ledgerPending: false, compactWanted: false }
+    return { state: INITIAL_SESSION_STATE, rolloutOffset: 0, ledgerPending: false }
   }
 }
 

@@ -7,6 +7,7 @@ import {
   parseCheckpoint,
   recordCommit,
   recordFileChanged,
+  recordLastReply,
   recordTest,
   renderLedger,
 } from '../src/core/ledger.ts'
@@ -132,6 +133,25 @@ describe('进度笔记', () => {
     const text = renderLedger(ledger, 500)
     expect(text.length).toBeLessThanOrEqual(500)
     expect(text).toEndWith('…(truncated)')
+  })
+})
+
+describe('压缩前最后一条回复', () => {
+  test('原样放在笔记末尾，不占笔记长度；空回复不覆盖上一条', () => {
+    const notes = applyCheckpoint(EMPTY_LEDGER, { goal: 'x'.repeat(900) })
+    const ledger = recordLastReply(recordLastReply(notes, '要我按建议改吗？先用记下的数据回放验证。'), '   ')
+    const text = renderLedger(ledger, 500)
+    expect(text).toStartWith(LEDGER_MARKER)
+    expect(text).toEndWith('要我按建议改吗？先用记下的数据回放验证。')
+    expect(text.slice(0, text.indexOf('## Your last reply')).length).toBeLessThanOrEqual(502)
+    expect(renderLedger(EMPTY_LEDGER, 500)).not.toContain('Your last reply')
+  })
+  test('超长时留结尾，标明前面省略了', () => {
+    const reply = `${'a'.repeat(5_000)}最后的提问：要不要先回放验证？`
+    const kept = recordLastReply(EMPTY_LEDGER, reply).facts.lastReply ?? ''
+    expect(kept.length).toBe(3_000)
+    expect(kept).toStartWith('…(earlier part omitted)')
+    expect(kept).toEndWith('最后的提问：要不要先回放验证？')
   })
 })
 

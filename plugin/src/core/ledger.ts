@@ -7,6 +7,8 @@ export type LedgerFacts = {
   lastBuild?: { command: string; passed: boolean }
   lastCommit?: { summary: string }
   tasksInProgress: string[]
+  /** 模型最近一轮给用户的回复，压缩后原样带回；用户的下一句话常常是在回答它 */
+  lastReply?: string
 }
 
 export type LedgerNotes = {
@@ -43,6 +45,9 @@ const MAX_DECISIONS = 30
 const MAX_FIELD_CHARS = 1_000
 /** 用户要求只追加，超过这么多条才丢最旧的 */
 const MAX_REQUIREMENTS = 30
+/** 带回的最后一条回复最多这么长，单独计算，不占笔记的长度；超长时留结尾，提问和待确认的提议通常在最后 */
+const MAX_REPLY_CHARS = 3_000
+const REPLY_CUT = '…(earlier part omitted)\n'
 
 export function recordFileChanged(ledger: Ledger, path: string): Ledger {
   const files = [...ledger.facts.filesChanged.filter(file => file !== path), path].slice(-MAX_FILES)
@@ -59,6 +64,13 @@ export function recordBuild(ledger: Ledger, command: string, passed: boolean): L
 
 export function recordCommit(ledger: Ledger, summary: string): Ledger {
   return { ...ledger, facts: { ...ledger.facts, lastCommit: { summary } } }
+}
+
+export function recordLastReply(ledger: Ledger, reply: string): Ledger {
+  const text = reply.trim()
+  if (!text) return ledger
+  const kept = text.length <= MAX_REPLY_CHARS ? text : `${REPLY_CUT}${text.slice(-(MAX_REPLY_CHARS - REPLY_CUT.length))}`
+  return { ...ledger, facts: { ...ledger.facts, lastReply: kept } }
 }
 
 export function recordTasksInProgress(ledger: Ledger, tasks: readonly string[]): Ledger {
@@ -155,8 +167,17 @@ export function applyCheckpoint(ledger: Ledger, input: CheckpointInput): Ledger 
 
 type Kept = { requirements: readonly string[]; decisions: readonly string[]; files: readonly string[] }
 
-/** 排版成补回上下文的文本，超长时先丢最旧的决定、再丢最早改过的文件、最后才丢最旧的用户要求，仍超长才截断。 */
+/**
+ * 排版成补回上下文的文本，超长时先丢最旧的决定、再丢最早改过的文件、最后才丢最旧的用户要求，仍超长才截断。
+ * 最后一条回复放在末尾，不算在 maxChars 里。
+ */
 export function renderLedger(ledger: Ledger, maxChars: number): string {
+  const reply = ledger.facts.lastReply
+  const notes = renderNotes(ledger, maxChars)
+  return reply ? `${notes}\n\n## Your last reply before compaction\nVerbatim; the user's next message may answer it.\n\n${reply}` : notes
+}
+
+function renderNotes(ledger: Ledger, maxChars: number): string {
   let kept: Kept = { requirements: ledger.notes.requirements ?? [], decisions: ledger.notes.decisions, files: ledger.facts.filesChanged }
   let rendered = layoutLedger(ledger, kept)
   while (rendered.length > maxChars) {

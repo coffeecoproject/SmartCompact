@@ -32,7 +32,8 @@ work = prepare_workspace(day, args.name)
 base_commit = git(work, 'rev-parse', 'HEAD')
 pi_args = ['pi', '--mode', 'rpc', '--no-extensions', '--no-session', '--model', args.model]
 if args.arm == 'plugin':
-    pi_args += ['-e', os.path.join(ROOT, 'adapters', 'pi', 'index.ts')]
+    # 评测里下一条任务紧接着发，模拟的是做完一件事后用户已经停顿过：不等用户空闲，否则插件永远压不了。
+    pi_args += ['-e', os.path.join(ROOT, 'adapters', 'pi', 'index.ts'), '--smartcompact-idle-seconds', '0']
 
 log = open(os.path.join(RESULTS, f'{args.name}.events.jsonl'), 'w', encoding='utf-8')
 proc = subprocess.Popen(pi_args, cwd=work, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)

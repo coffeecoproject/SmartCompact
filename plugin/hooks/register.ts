@@ -11,11 +11,13 @@ import {
   COMPACT_INSTRUCTIONS,
   isLedgerText,
   parseCheckpoint,
+  recordLastReply,
   renderLedger,
 } from '../src/core/ledger.ts'
 import type { Lines } from '../src/core/lines.ts'
 import { type Params, resolveParams } from '../src/core/params.ts'
 import { promptReminder } from '../src/core/reminder.ts'
+import { type PendingCompaction, planCompaction, staleCompaction } from '../src/core/pending.ts'
 import { countDecisions, renderReport } from '../src/core/report.ts'
 import { pricesFor } from '../src/core/usage.ts'
 import {
@@ -39,12 +41,13 @@ import { parseRecord, RECORD_PREFIX, type SessionRecord, staleRecordKeys } from 
 const CHECKPOINT_TOOL = 'mcp__smartcompact__checkpoint'
 const LOG_KEY = 'log'
 const LOG_LIMIT = 1_000
+/** 本轮还在收尾时调用会被拒，至少等这么久 */
 const COMPACT_DELAY_MS = 500
 const CLAUDE_PRICES = pricesFor('anthropic')
 
 let params: Params = resolveParams()
-/** 一轮结束后排队等待执行的压缩；用户发新消息时作废。 */
-let pendingCompaction: object | null = null
+/** 一轮结束后等用户空闲再执行的压缩；用户发新消息时作废，到点时再核对会话现状。 */
+let pendingCompaction: PendingCompaction | null = null
 /** 插件自己发起的压缩不经过本插件的 session.compact hook，笔记在下一条消息时补回。 */
 let ledgerToAttach: string | null = null
 /** 无界面会话里改为排队执行 /compact，等空闲才运行；期间压缩过或用户发了新消息就作废。 */
@@ -92,10 +95,16 @@ async function sample($: EngineInterface, state: SessionState, lines: Lines | nu
   return { tokens, state: withSample(state, tokens, lines.ceiling, CLAUDE_PRICES) }
 }
 
-async function compactNow($: EngineInterface, ticket: object): Promise<void> {
+async function compactNow($: EngineInterface, ticket: PendingCompaction): Promise<void> {
   if (pendingCompaction !== ticket) return
   pendingCompaction = null
   try {
+    // 等待期间用户可能 /clear、自己 /compact 或暂停了插件，这些都不经过 prompt.submit。
+    const stale = staleCompaction(ticket, await loadSession($), await $.session.id())
+    if (stale) {
+      await log($, { event: 'compacted', action: 'skipped', reason: stale, trigger: 'plugin' })
+      return
+    }
     const done = await $.session.compact({ instructions: COMPACT_INSTRUCTIONS })
     if (done.skip !== undefined) {
       await log($, { event: 'compacted', action: 'skipped', trigger: 'plugin', detail: done.skip })
@@ -212,8 +221,17 @@ export const register: Register = (on, options) => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
+  // 等待期间开始了新的一轮（用户回话、斜杠命令、后台任务的通知），说明还在进行，这次不压，等下一次停顿。
+  // 斜杠命令不经过 prompt.submit，所以接在每一轮都会触发的 turn.start 上。
+  on('turn.start', async ($, e, next) => {
+    if (pendingCompaction) {
+      pendingCompaction = null
+      await log($, { event: 'compacted', action: 'cancelled', reason: 'new-turn', trigger: 'plugin' })
+    }
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
   on('prompt.submit', async ($, e, next) => {
-    pendingCompaction = null
     queuedPending = false
     const context = [...(e.context ?? [])]
     if (ledgerToAttach) {
@@ -233,11 +251,16 @@ export const register: Register = (on, options) => {
   on('turn.complete', async ($, e, next) => {
     const result = await next(e)
     try {
-      // 被用户打断或出错结束的一轮不压缩。
-      if (e.reason !== 'answer') return result
+      // 被用户打断或出错结束的一轮不压缩；子 agent 的一轮结束时主会话还在进行，也不算。
+      if (e.reason !== 'answer' || e.agentId) return result
+      const loaded = await loadSession($)
+      const replied = { ...loaded, ledger: recordLastReply(loaded.ledger, e.answer) }
       const lines = await loadLines($)
-      if (!lines) return result
-      const { tokens, state } = await sample($, await loadSession($), lines)
+      if (!lines) {
+        await saveSession($, replied)
+        return result
+      }
+      const { tokens, state } = await sample($, replied, lines)
       await saveSession($, state)
       const decision = decideAtTurnEnd(
         { tokens, lines, work: state.work, expectedAfterTokens: expectedAfterTokens(state, params.defaultAfterTokens), paused: state.paused },
@@ -246,10 +269,11 @@ export const register: Register = (on, options) => {
       const sinceMilestoneTokens = decision.action === 'compact' ? growthSinceMilestone(state.work, tokens) : undefined
       if (decision.action !== 'none') await log($, { event: 'turn-end', action: decision.action, reason: decision.reason, tokens, sinceMilestoneTokens })
       if (decision.action === 'compact') {
-        const ticket = {}
+        // 等用户空闲一会儿再压：还在讨论时不打断，用户也不用等压缩完才得到回复。
+        const now = await $.clock.now()
+        const ticket = planCompaction(await $.session.id(), state, now, params)
         pendingCompaction = ticket
-        // 本轮还在收尾时调用会被拒，稍等再压缩。
-        $.clock.after(COMPACT_DELAY_MS, () => compactNow($, ticket))
+        $.clock.after(Math.max(COMPACT_DELAY_MS, ticket.notBefore - now), () => compactNow($, ticket))
       }
     } catch (error) {
       await log($, { event: 'error', reason: 'turn.complete', detail: String(error) })

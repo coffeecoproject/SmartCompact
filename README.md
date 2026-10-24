@@ -14,9 +14,9 @@
 Every request re-reads the whole context, so a long context makes every step expensive. Native auto-compaction waits until the context is nearly full (close to 1M tokens in Claude Code, up to 800k in Codex if configured), and it ignores timing, so it often lands in the middle of a task. SmartCompact works with Claude Code (CLI and desktop app), [Pi](https://github.com/earendil-works/pi) and the Codex CLI:
 
 - **Compact at a good moment.** Once the context passes the **allow line** (200k tokens by default), it compacts when a turn ends, if a piece of work has been finished since the last compaction (a commit, tests passing, a task completed) and no file has been changed since.
-- **Never in the middle of work.** It only decides when a turn ends, never mid-turn, and it waits while tests or the build are failing or errors keep repeating.
+- **Never in the middle of work.** It only decides when a turn ends, never mid-turn, and it waits while tests or the build are failing or errors keep repeating. It also waits until you have been idle for 3 minutes, so a back-and-forth discussion is not cut off.
 - **No limit of its own.** If no piece of work gets finished, the agent is usually deep in one large task, which is when a large context pays off. SmartCompact leaves it alone, and the platform's native compaction applies as it would without the plugin.
-- **A progress ledger bridges the gap.** Files changed, the latest commit and test result, and the user requirements and decisions the agent recorded are handed back to the model after compaction.
+- **A progress ledger bridges the gap.** Files changed, the latest commit and test result, the user requirements and decisions the agent recorded, and the agent's last reply are handed back to the model after compaction.
 - **No pointless compactions.** It skips compaction when it would not free enough space.
 
 ## Results
@@ -68,10 +68,11 @@ Codex hooks cannot postpone a compaction in the middle of a turn, so SmartCompac
 |---|---|---|
 | Allow line | 200000 | Above it, compact when a turn ends once a piece of work has been finished |
 | Minimum freed | 60000 | Skip compaction if it is expected to free less than this |
+| Idle wait | 180 | After deciding to compact, wait until you have been idle this many seconds; a new message or command cancels it |
 
-- Claude Code: the plugin options `allowLineTokens` and `minFreedTokens`; leave them empty for the defaults.
-- Pi: the flags `--smartcompact-allow-line` and `--smartcompact-min-freed`.
-- Codex: the environment variables `SMARTCOMPACT_ALLOW_LINE` and `SMARTCOMPACT_MIN_FREED`.
+- Claude Code: the plugin options `allowLineTokens`, `minFreedTokens` and `compactIdleSeconds`; leave them empty for the defaults.
+- Pi: the flags `--smartcompact-allow-line`, `--smartcompact-min-freed` and `--smartcompact-idle-seconds`.
+- Codex: the environment variables `SMARTCOMPACT_ALLOW_LINE`, `SMARTCOMPACT_MIN_FREED` and `SMARTCOMPACT_IDLE_SECONDS`.
 
 ## Seeing what it did
 

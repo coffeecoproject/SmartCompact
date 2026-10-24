@@ -19,6 +19,8 @@ export type Params = {
   nudgeAtShare: number
   /** 超过 L、在等做完一件事时，上下文每涨这么多提醒一次模型做完一步就标完成 */
   remindEveryTokens: number
+  /** 一轮结束、决定压缩后，用户空闲这么多秒没发消息才压缩；期间发了消息就取消，等下一次停顿 */
+  compactIdleSeconds: number
 }
 
 export const DEFAULT_PARAMS: Params = Object.freeze({
@@ -31,6 +33,7 @@ export const DEFAULT_PARAMS: Params = Object.freeze({
   ledgerMaxChars: 6_000,
   nudgeAtShare: 0.85,
   remindEveryTokens: 100_000,
+  compactIdleSeconds: 180,
 })
 
 const MINIMUMS: Record<keyof Params, number> = {
@@ -43,6 +46,7 @@ const MINIMUMS: Record<keyof Params, number> = {
   ledgerMaxChars: 200,
   nudgeAtShare: 0,
   remindEveryTokens: 1,
+  compactIdleSeconds: 0,
 }
 
 /** 用户覆盖的值逐项校验，不合法的项沿用默认值。 */

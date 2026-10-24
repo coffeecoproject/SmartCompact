@@ -14,9 +14,9 @@
 agent 每发一次请求，都要把整段上下文重新读一遍，上下文越长，每一步越贵。原生的自动压缩要等到快满了才触发（Claude Code 接近 100 万，Codex 可以配到 80 万），而且不看时机，常常发生在一件事做到一半的时候。SmartCompact 支持 Claude Code（终端和桌面 App）、[Pi](https://github.com/earendil-works/pi) 和 Codex 命令行：
 
 - **挑对时机压缩。** 上下文超过**允许压缩线**（默认 20 万）以后，只要上次压缩以来做完过一件事（一次提交、测试通过、任务完成），之后又没开始改文件，就在这一轮结束时压缩。
-- **不在做到一半时压缩。** 只在一轮结束时判断，从不在一轮中间主动压缩；测试失败、构建失败或连续报错时先等着。
+- **不在做到一半时压缩。** 只在一轮结束时判断，从不在一轮中间主动压缩；测试失败、构建失败或连续报错时先等着。还要等你空闲 3 分钟没发消息才压，来回讨论时不会被打断。
 - **不设自己的上限。** 一直没做完一件事，多半是在干一件大活，这时正需要大上下文。插件不去打断，压缩按平台原生规则来，和没装插件时一样。
-- **用进度笔记接上。** 改过的文件、最近的提交和测试结果、记下的用户要求和决定，压缩后补回给模型。
+- **用进度笔记接上。** 改过的文件、最近的提交和测试结果、记下的用户要求和决定，以及模型最后一条回复，压缩后补回给模型。
 - **不做白费的压缩。** 预计腾不出足够空间时不压缩，避免刚压缩完又压缩。
 
 ## 实验结果
@@ -68,10 +68,11 @@ Codex 的 hook 不能推迟一轮中间的压缩，所以插件在一轮结束�
 |---|---|---|
 | 允许压缩线 | 200000 | 超过它、做完过一件事后，在一轮结束时压缩 |
 | 最少腾出空间 | 60000 | 预计腾出的空间少于它时不压缩 |
+| 空闲等待 | 180 | 决定压缩后，等你空闲这么多秒才压；期间发了消息或命令就取消 |
 
-- Claude Code：插件配置项 `allowLineTokens`、`minFreedTokens`，留空用默认值。
-- Pi：命令行开关 `--smartcompact-allow-line`、`--smartcompact-min-freed`。
-- Codex：环境变量 `SMARTCOMPACT_ALLOW_LINE`、`SMARTCOMPACT_MIN_FREED`。
+- Claude Code：插件配置项 `allowLineTokens`、`minFreedTokens`、`compactIdleSeconds`，留空用默认值。
+- Pi：命令行开关 `--smartcompact-allow-line`、`--smartcompact-min-freed`、`--smartcompact-idle-seconds`。
+- Codex：环境变量 `SMARTCOMPACT_ALLOW_LINE`、`SMARTCOMPACT_MIN_FREED`、`SMARTCOMPACT_IDLE_SECONDS`。
 
 ## 查看效果
 

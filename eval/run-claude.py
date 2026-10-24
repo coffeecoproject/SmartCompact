@@ -39,7 +39,9 @@ json.dump({'mcpServers': {}}, open(empty_mcp, 'w'))
 cmd = ['claude', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--model', args.model,
        '--setting-sources', 'project,local', '--strict-mcp-config', '--mcp-config', empty_mcp, '--dangerously-skip-permissions']
 if args.arm == 'plugin':
-    cmd += ['--plugin-dir', os.path.join(ROOT, 'plugin')]
+    # 评测里下一条任务紧接着发，模拟的是做完一件事后用户已经停顿过：不等用户空闲，否则插件永远压不了。
+    idle = {'options': {'compactIdleSeconds': 0}}
+    cmd += ['--plugin-dir', os.path.join(ROOT, 'plugin'), '--settings', json.dumps({'pluginConfigs': {'smartcompact': idle, 'smartcompact@inline': idle}})]
 
 log = open(os.path.join(RESULTS, f'{args.name}.events.jsonl'), 'w', encoding='utf-8')
 # 从装了 SmartCompact 的会话里启动时，会继承它调低的原生压缩线；两组都要从 Claude 的默认值开始。

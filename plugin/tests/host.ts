@@ -2,9 +2,10 @@
 
 import type { On } from 'claude-code'
 
-export function stubHost(on: On): Map<string, unknown> {
+/** clock 为 false 时不接时钟，由测试自己用 mock.clock 控制时间。 */
+export function stubHost(on: On, clock = true): Map<string, unknown> {
   const store = new Map<string, unknown>()
-  on('clock.now', () => ({ value: 0 }))
+  if (clock) on('clock.now', () => ({ value: 0 }))
   on('session.id', () => ({ value: 'test-session' }))
   on('store.get', ($, e) => ({ value: store.get(e.key) }))
   on('store.set', ($, e) => {

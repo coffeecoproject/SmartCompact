@@ -5,6 +5,8 @@
 
 - baseline 用 ~/.smartcompact-eval/codex-home-baseline（不装插件），plugin 用 ~/.smartcompact-eval/codex-home（装了 SmartCompact hook）。
   两个环境的模型设置都与用户的 ~/.codex/config.toml 一致，各自的后台服务需要先启动。
+  hook 由后台服务拉起，插件参数要在启动 plugin 组的后台服务时用环境变量给：至少 SMARTCOMPACT_IDLE_SECONDS=0。
+  评测里下一条任务紧接着发，模拟的是做完一件事后用户已经停顿过；不设的话插件要等用户空闲 3 分钟，永远压不了。
 - 沙箱为 workspace-write，另把 .git 设为可写以便提交。
 - 结果写到 ~/.smartcompact-eval/results/<运行名>.json。
 """

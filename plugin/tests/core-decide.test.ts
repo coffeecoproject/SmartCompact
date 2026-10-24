@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'claude-code/testing'
 import { type DecisionInput, decideAtTurnEnd, decideMidTurn } from '../src/core/decide.ts'
 import { DEFAULT_PARAMS, resolveParams } from '../src/core/params.ts'
+import { planCompaction, staleCompaction } from '../src/core/pending.ts'
 import { INITIAL_WORK_STATE, type WorkState } from '../src/core/signals.ts'
+import { INITIAL_SESSION_STATE } from '../src/core/state.ts'
 
 const params = DEFAULT_PARAMS
 // 1M 窗口：L=200k，C=967k
@@ -77,5 +79,24 @@ describe('一轮进行中', () => {
   test('暂停或读不到用量时放行', () => {
     expect(decideMidTurn(input(270_000, { testsFailing: true }, { paused: true }), params).action).toBe('allow')
     expect(decideMidTurn(input(undefined, { testsFailing: true }), params).action).toBe('allow')
+  })
+})
+
+describe('等用户空闲再执行的压缩', () => {
+  const pending = planCompaction('s1', INITIAL_SESSION_STATE, 1_000, params)
+
+  test('按空闲秒数定执行时间；0 秒表示不等', () => {
+    expect(pending).toEqual({ session: 's1', compactions: 0, notBefore: 181_000 })
+    expect(planCompaction('s1', INITIAL_SESSION_STATE, 1_000, resolveParams({ compactIdleSeconds: 0 })).notBefore).toBe(1_000)
+  })
+
+  test('到点时会话没变就压', () => {
+    expect(staleCompaction(pending, INITIAL_SESSION_STATE, 's1')).toBeUndefined()
+  })
+
+  test('换了会话、期间压缩过或暂停了就不压', () => {
+    expect(staleCompaction(pending, INITIAL_SESSION_STATE, 's2')).toBe('session-changed')
+    expect(staleCompaction(pending, { ...INITIAL_SESSION_STATE, compactions: 1 }, 's1')).toBe('compacted-meanwhile')
+    expect(staleCompaction(pending, { ...INITIAL_SESSION_STATE, paused: true }, 's1')).toBe('paused')
   })
 })
