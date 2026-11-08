@@ -1,7 +1,14 @@
 // 无界面会话里插件排队执行的 /compact：它不经过本插件的 command.run hook，到压缩时才能认出。
 
+import { COMPACT_INSTRUCTIONS } from '../core/ledger.ts'
+
 /** 排队时 /compact 带的参数：对话里会显示出来，所以只放一个标记，完整说明在压缩时换进去。 */
-export const QUEUED_COMPACT_ARGS = 'SmartCompact'
+export const QUEUED_COMPACT_ARGS = 'by SmartCompact'
+
+/** 摘要要按完整说明写，不能拿到标记本身；插件的 hook 出错退回时也一样。 */
+export function withFullInstructions<T extends { instructions?: string }>(e: T): T {
+  return e.instructions === QUEUED_COMPACT_ARGS ? { ...e, instructions: COMPACT_INSTRUCTIONS } : e
+}
 
 /**
  * 一次压缩是不是插件排的 /compact：以手动触发、参数是这个标记认出。

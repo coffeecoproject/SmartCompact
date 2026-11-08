@@ -10,8 +10,6 @@ export type SessionRecord = {
   /** core 的 SessionState，由 parseState 校验 */
   state: unknown
   native: NativeSetup | null
-  /** 压缩过、进度笔记还没随下一条消息带上 */
-  ledgerPending: boolean
   updatedAt: number
 }
 
@@ -20,7 +18,6 @@ export function parseRecord(raw: unknown): SessionRecord {
   return {
     state: record.state,
     native: parseNative(record.native),
-    ledgerPending: record.ledgerPending === true,
     updatedAt: typeof record.updatedAt === 'number' ? record.updatedAt : 0,
   }
 }

@@ -33,7 +33,7 @@ import {
   withSignals,
 } from '../src/core/state.ts'
 import type { NativeSetup } from '../src/claude/native.ts'
-import { QUEUED_COMPACT_ARGS, queuedCompaction } from '../src/claude/queued.ts'
+import { QUEUED_COMPACT_ARGS, queuedCompaction, withFullInstructions } from '../src/claude/queued.ts'
 import { recognize, taskCompleted, taskCreated } from '../src/claude/recognize.ts'
 import { parseRecord, RECORD_PREFIX, type SessionRecord, staleRecordKeys } from '../src/claude/record.ts'
 
@@ -64,11 +64,6 @@ async function loadSession($: EngineInterface): Promise<SessionState> {
 
 async function saveSession($: EngineInterface, state: SessionState): Promise<void> {
   await saveRecord($, { ...(await loadRecord($)), state })
-}
-
-/** 压缩后的状态；笔记不放进对话，作为用户看不到的附加内容随下一条消息带上。 */
-async function saveCompaction($: EngineInterface, state: SessionState): Promise<void> {
-  await saveRecord($, { ...(await loadRecord($)), state, ledgerPending: true })
 }
 
 async function loadLines($: EngineInterface): Promise<Lines | null> {
@@ -113,7 +108,7 @@ async function compactNow($: EngineInterface, ticket: PendingCompaction): Promis
       return
     }
     const before = await loadSession($)
-    await saveCompaction($, withCompaction(before, done.tokensBefore ?? 0, done.tokensAfter ?? 0))
+    await saveSession($, withCompaction(before, done.tokensBefore ?? 0, done.tokensAfter ?? 0))
     await log($, { event: 'compacted', trigger: 'plugin', tokensBefore: done.tokensBefore, tokensAfter: done.tokensAfter, ...cycleReads(before) })
   } catch (error) {
     // 无界面会话（桌面 App、SDK、-p）暂不支持直接压缩，改为排队执行 /compact，等会话空闲时运行。
@@ -209,6 +204,14 @@ export const register: Register = (on, options) => {
     return ran
   }).catch(($, e, next) => next(e))
 
+  // 压缩结果里加不了隐藏内容，压缩生效时的 SessionStart 可以：用户看不到，模型在这一轮就读得到；提前算好的摘要也是生效时才触发。
+  on('classic.SessionStart', async ($, e, next) => {
+    const result = await next(e)
+    if (e.source !== 'compact' || e.agent_id) return result
+    const ledger = renderLedger((await loadSession($)).ledger, params.ledgerMaxChars)
+    return { ...result, additionalContext: [...(result.additionalContext ?? []), ledger] }
+  }).catch(($, e, next) => next(e))
+
   on('classic.TaskCreated', async ($, e, next) => {
     const state = await loadSession($)
     await saveSession($, { ...state, ledger: taskCreated(state.ledger, e.task_subject) })
@@ -234,8 +237,6 @@ export const register: Register = (on, options) => {
   on('prompt.submit', async ($, e, next) => {
     queuedPending = false
     const context = [...(e.context ?? [])]
-    const { ledgerPending, state } = await loadRecord($)
-    if (ledgerPending) context.push(renderLedger(parseState(state).ledger, params.ledgerMaxChars))
     const lines = await loadLines($)
     const reminder = lines ? promptReminder(await loadSession($), (await $.session.usage()).context.tokens, lines, params, CHECKPOINT_TOOL) : undefined
     if (reminder) {
@@ -243,16 +244,7 @@ export const register: Register = (on, options) => {
       await saveSession($, reminder.state)
       await log($, reminder.log)
     }
-    const result = await next(context.length ? { ...e, context } : e)
-    // 笔记随消息进去了才清掉标记；被别的 hook 拦下或这里出错时，下一条消息再带。
-    if (ledgerPending && result.drop === undefined) {
-      try {
-        await saveRecord($, { ...(await loadRecord($)), ledgerPending: false })
-      } catch (error) {
-        await log($, { event: 'error', reason: 'prompt.submit', detail: String(error) })
-      }
-    }
-    return result
+    return next(context.length ? { ...e, context } : e)
   }).catch(($, e, next) => next(e))
 
   on('turn.complete', async ($, e, next) => {
@@ -289,7 +281,7 @@ export const register: Register = (on, options) => {
   })
 
   on('session.compact', async ($, e, next) => {
-    // 子 agent 自己的压缩和提前计算的摘要不干预；原生自动压缩只在快满时发生，一律放行，下一条消息时补回笔记。
+    // 子 agent 自己的压缩和提前计算的摘要不干预；原生自动压缩一律放行；笔记由 SessionStart 补回。
     if (e.agentId || e.trigger === 'precompute') return next(e)
     const queued = queuedCompaction(e, queuedPending)
     const ours = queued === 'ours'
@@ -299,12 +291,12 @@ export const register: Register = (on, options) => {
     }
     queuedPending = false
     const state = await loadSession($)
-    const result = await next(ours ? { ...e, instructions: COMPACT_INSTRUCTIONS } : e)
+    const result = await next(withFullInstructions(e))
     if (result.skip !== undefined) return result
     const reads = cycleReads(state)
-    await saveCompaction($, withCompaction(state, result.tokensBefore ?? 0, result.tokensAfter ?? 0, e.trigger !== 'manual' || ours))
+    await saveSession($, withCompaction(state, result.tokensBefore ?? 0, result.tokensAfter ?? 0, e.trigger !== 'manual' || ours))
     const trigger = ours ? 'plugin-queued' : e.trigger
     await log($, { event: 'compacted', trigger, tokensBefore: result.tokensBefore, tokensAfter: result.tokensAfter, ...reads })
     return result
-  }).catch(($, e, next) => next(e))
+  }).catch(($, e, next) => next(withFullInstructions(e)))
 }
