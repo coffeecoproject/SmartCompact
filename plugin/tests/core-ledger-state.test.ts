@@ -2,7 +2,6 @@ import { describe, expect, test } from 'claude-code/testing'
 import {
   applyCheckpoint,
   EMPTY_LEDGER,
-  isLedgerText,
   LEDGER_MARKER,
   parseCheckpoint,
   recordCommit,
@@ -84,8 +83,6 @@ describe('进度笔记', () => {
     expect(text).toContain('迁移登录模块')
     expect(text).toContain('src/login.ts')
     expect(text).toContain('tests FAILED: npm test')
-    expect(isLedgerText(text)).toBe(true)
-    expect(isLedgerText('hello')).toBe(false)
   })
 
   test('超长时先丢最旧的决定，结果和提交留着', () => {

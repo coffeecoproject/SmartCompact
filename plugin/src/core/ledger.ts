@@ -27,7 +27,7 @@ export const EMPTY_LEDGER: Ledger = Object.freeze({
   notes: Object.freeze({ decisions: [] }),
 }) as Ledger
 
-/** 笔记文本的开头，适配层据此认出上一次放入的笔记并替换。 */
+/** 笔记文本的开头，让模型认出这是插件写的笔记，不是用户的话。 */
 export const LEDGER_MARKER = '[SmartCompact progress ledger]'
 
 /**
@@ -38,7 +38,7 @@ export const COMPACT_INSTRUCTIONS =
   'Preserve the current goal, decisions and their reasons, unfinished work, failed attempts, and exact file paths. ' +
   'Also keep every specific fact the user stated, verbatim, even if the current work does not need it: ' +
   'names of people and customers, dates and time windows, ticket or ID numbers, and constraints. ' +
-  'A SmartCompact progress ledger is attached after the summary; do not restate it.'
+  'A SmartCompact progress ledger is attached after compaction; do not restate it.'
 
 const MAX_FILES = 30
 const MAX_DECISIONS = 30
@@ -215,8 +215,4 @@ function layoutLedger({ facts, notes }: Ledger, { requirements, decisions, files
   section('Decisions', [omitted(notes.decisions.length - decisions.length, 'decisions'), ...decisions.map(decision => `- ${decision}`)])
   section('Files changed', [omitted(facts.filesChanged.length - files.length, 'files'), ...files.map(file => `- ${file}`)])
   return lines.join('\n')
-}
-
-export function isLedgerText(value: string): boolean {
-  return value.startsWith(LEDGER_MARKER)
 }

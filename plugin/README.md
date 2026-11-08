@@ -22,7 +22,7 @@ All hooks live in one module, `hooks/register.ts`.
 - **Prompt submit**: adds context to the turn, never changes the user's message. After a compaction it adds the progress ledger; once per cycle, when the context nears the allow line, it adds a one-line reminder to record progress with `checkpoint`; past the allow line, while it waits for a finished piece of work, it reminds the model to mark each finished step with `checkpoint`, again every further 100k tokens.
 - **Turn start**: cancels a compaction still waiting for the user to go idle; any new turn counts, including one started by a slash command.
 - **Turn complete**: keeps the model's final reply and decides whether to compact. When it should, it waits until the user has been idle for 3 minutes (a new turn cancels it) and then compacts the session; the reply is handed back with the ledger. Where a session cannot compact directly (headless sessions such as the desktop app), it runs the `/compact` command itself with SmartCompact's compaction instructions; it runs no other commands.
-- **Compaction**: never blocks or changes a compaction itself. After any compaction of the main session it appends the progress ledger to the compacted context. Subagent compactions are left alone.
+- **Compaction**: never blocks or changes a compaction itself. After any compaction of the main session it marks the progress ledger to be added, unseen by the user, to the next prompt. Subagent compactions are left alone.
 
 ## Use
 

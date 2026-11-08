@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 import { COMPACT_INSTRUCTIONS, LEDGER_MARKER } from '../src/core/ledger.ts'
-import { queuedCompaction } from '../src/claude/queued.ts'
+import { QUEUED_COMPACT_ARGS, queuedCompaction } from '../src/claude/queued.ts'
 import { stubHost } from './host.ts'
 
 // 测试里由 $ 发起的压缩不带对话内容；外层放一个插件补上，模拟真实会话里引擎给的输入。
@@ -14,40 +14,50 @@ const withMessages = {
 
 const row = (text: string) => ({ role: 'user' as const, text, toolUses: [] })
 
-test('压缩结果里只保留最新的一份进度笔记', { plugins: [withMessages] }, async ($, on) => {
+test('压缩结果不加笔记，下一条消息时作为附加内容带上一次', { plugins: [withMessages] }, async ($, on) => {
   const store = stubHost(on)
-  on('session.compact', () => ({
-    messages: [row(`${LEDGER_MARKER}\nold`), row('summary of the conversation')],
-    tokensBefore: 300_000,
-    tokensAfter: 20_000,
-  }))
+  on('session.compact', () => ({ messages: [row('summary of the conversation')], tokensBefore: 300_000, tokensAfter: 20_000 }))
+  on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
   const result = await $.session.compact({ instructions: 'x' })
   if (result.skip !== undefined) throw new Error(`skipped: ${result.skip}`)
-  const ledgers = result.messages.filter(message => message.text.startsWith(LEDGER_MARKER))
-  expect(ledgers).toHaveLength(1)
-  expect(result.messages.at(-1)?.text).toStartWith(LEDGER_MARKER)
-  expect(result.messages.at(-1)?.text).not.toContain('\nold')
+  expect(result.messages.map(message => message.text)).toEqual(['summary of the conversation'])
   expect(store.get('log')).toEqual([expect.objectContaining({ event: 'compacted', session: 'test-session', tokensBefore: 300_000, tokensAfter: 20_000 })])
-  expect(store.has('session:test-session')).toBe(true)
+  const first = await $.prompt.submit({ text: 'next' })
+  expect(first.context?.filter(block => block.startsWith(LEDGER_MARKER))).toHaveLength(1)
+  const second = await $.prompt.submit({ text: 'again' })
+  expect(second.context?.some(block => block.startsWith(LEDGER_MARKER)) ?? false).toBe(false)
 })
 
-test('插件排队的 /compact 在压缩时以说明认出；作废时跳过；用户自己的 /compact 不算', () => {
-  expect(queuedCompaction({ trigger: 'manual', instructions: COMPACT_INSTRUCTIONS }, true)).toBe('ours')
-  expect(queuedCompaction({ trigger: 'manual', instructions: COMPACT_INSTRUCTIONS }, false)).toBe('stale')
+test('消息被拦下时笔记留到下一条再带', { plugins: [withMessages] }, async ($, on) => {
+  stubHost(on)
+  let blocked = true
+  on('session.compact', () => ({ messages: [row('summary of the conversation')], tokensBefore: 300_000, tokensAfter: 20_000 }))
+  on('prompt.submit', ($, e) => (blocked ? { drop: 'blocked' } : { text: e.text, context: e.context }))
+  await $.session.compact({ instructions: 'x' })
+  expect((await $.prompt.submit({ text: 'first' })).drop).toBe('blocked')
+  blocked = false
+  const next = await $.prompt.submit({ text: 'second' })
+  expect(next.context?.filter(block => block.startsWith(LEDGER_MARKER))).toHaveLength(1)
+})
+
+test('插件排队的 /compact 在压缩时以标记认出；作废时跳过；用户自己的 /compact 不算', () => {
+  expect(queuedCompaction({ trigger: 'manual', instructions: QUEUED_COMPACT_ARGS }, true)).toBe('ours')
+  expect(queuedCompaction({ trigger: 'manual', instructions: QUEUED_COMPACT_ARGS }, false)).toBe('stale')
+  expect(queuedCompaction({ trigger: 'manual', instructions: COMPACT_INSTRUCTIONS }, true)).toBeNull()
   expect(queuedCompaction({ trigger: 'manual', instructions: 'keep the plan' }, true)).toBeNull()
   expect(queuedCompaction({ trigger: 'manual' }, true)).toBeNull()
-  expect(queuedCompaction({ trigger: 'auto', instructions: COMPACT_INSTRUCTIONS }, true)).toBeNull()
+  expect(queuedCompaction({ trigger: 'auto', instructions: QUEUED_COMPACT_ARGS }, true)).toBeNull()
 })
 
 test('一轮结束时记下最后一条回复，压缩后和笔记一起带回；子 agent 的一轮不算', { plugins: [withMessages] }, async ($, on) => {
   stubHost(on)
   on('turn.complete', () => ({ text: '' }))
   on('session.compact', () => ({ messages: [row('summary of the conversation')], tokensBefore: 300_000, tokensAfter: 20_000 }))
+  on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
   await $.turn.complete({ reason: 'answer', answer: '要我按建议改吗？先回放验证。', durationMs: 1, isAborted: false, turnId: 't1' })
   await $.turn.complete({ reason: 'answer', answer: 'subagent report', durationMs: 1, isAborted: false, turnId: 't2', agentId: 'a1' })
-  const result = await $.session.compact({ instructions: 'x' })
-  if (result.skip !== undefined) throw new Error(`skipped: ${result.skip}`)
-  const ledger = result.messages.at(-1)?.text ?? ''
+  await $.session.compact({ instructions: 'x' })
+  const ledger = (await $.prompt.submit({ text: 'next' })).context?.find(block => block.startsWith(LEDGER_MARKER)) ?? ''
   expect(ledger).toStartWith(LEDGER_MARKER)
   expect(ledger).toEndWith('要我按建议改吗？先回放验证。')
   expect(ledger).not.toContain('subagent report')
@@ -63,6 +73,7 @@ describe('等用户空闲再压缩', () => {
     on('session.usage', () => ({ value: { context: { tokens: 300_000, window: 1_000_000 } } }))
     on('turn.complete', () => ({ text: '' }))
     on('turn.start', ($, e) => ({ turnId: e.turnId }))
+    on('prompt.submit', ($, e) => ({ text: e.text, context: e.context }))
     on('session.compact', () => {
       calls.compact += 1
       return { messages: [row('summary')], tokensBefore: 300_000, tokensAfter: 20_000 }
@@ -80,6 +91,8 @@ describe('等用户空闲再压缩', () => {
     await clock.advance(1_000)
     expect(calls.compact).toBe(1)
     expect(log()).toEqual([expect.objectContaining({ trigger: 'plugin', tokensBefore: 300_000 })])
+    const ledger = (await $.prompt.submit({ text: 'next' })).context?.find(block => block.startsWith(LEDGER_MARKER)) ?? ''
+    expect(ledger).toEndWith('要我按建议改吗？')
   })
 
   // 用户回话和斜杠命令（不经过 prompt.submit、没有输入的文字）开始的一轮都要撤销。
